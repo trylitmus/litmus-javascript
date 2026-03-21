@@ -3,8 +3,18 @@ import { LitmusClient } from "../src";
 import type { TrackEvent } from "../src";
 
 // Captures request bodies sent to the mock server.
+interface CapturedEvent {
+  id: string;
+  type: string;
+  session_id: string;
+  timestamp: string;
+  generation_id?: string;
+  prompt_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
 interface CapturedRequest {
-  events: Array<{ id: string; type: string; session_id: string; timestamp: string }>;
+  events: CapturedEvent[];
 }
 
 function createMockServer(responses: Array<{ status: number }>) {
@@ -388,6 +398,78 @@ describe("LitmusClient", () => {
       client.destroy();
       mock.restore();
       vi.useRealTimers();
+    });
+  });
+
+  describe("generation()", () => {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+    it("returns an object with a UUID id", () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const result = client.generation("sess_1");
+
+      expect(result).toHaveProperty("id");
+      expect(result.id).toMatch(UUID_RE);
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("auto-tracks a generation event", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const result = client.generation("sess_1", { prompt_id: "v1" });
+      await client.flush();
+
+      expect(mock.requests).toHaveLength(1);
+      const event = mock.requests[0].events[0];
+      expect(event.type).toBe("generation");
+      expect(event.session_id).toBe("sess_1");
+      expect(event.prompt_id).toBe("v1");
+      expect(event.generation_id).toBe(result.id);
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("passes metadata through", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      client.generation("sess_1", { metadata: { model: "gpt-4" } });
+      await client.flush();
+
+      expect(mock.requests).toHaveLength(1);
+      const event = mock.requests[0].events[0];
+      expect(event.metadata).toEqual({ model: "gpt-4" });
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("returned id links subsequent events", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1");
+      client.track({
+        type: "copy",
+        session_id: "sess_1",
+        generation_id: gen.id,
+      });
+      await client.flush();
+
+      expect(mock.requests).toHaveLength(1);
+      const events = mock.requests[0].events;
+      expect(events).toHaveLength(2);
+      expect(events[0].generation_id).toBe(gen.id);
+      expect(events[1].generation_id).toBe(gen.id);
+
+      client.destroy();
+      mock.restore();
     });
   });
 

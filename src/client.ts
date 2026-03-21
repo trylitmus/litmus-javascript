@@ -98,6 +98,21 @@ export class LitmusClient {
     }
   }
 
+  generation(sessionId: string, opts?: {
+    prompt_id?: string;
+    metadata?: Record<string, unknown>;
+  }): { id: string } {
+    const generationId = crypto.randomUUID();
+    this.track({
+      type: "generation",
+      session_id: sessionId,
+      generation_id: generationId,
+      prompt_id: opts?.prompt_id,
+      metadata: opts?.metadata,
+    });
+    return { id: generationId };
+  }
+
   async flush(): Promise<void> {
     if (this.buffer.length === 0) return;
 
