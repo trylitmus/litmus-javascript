@@ -34,10 +34,16 @@ interface ResolvedConfig {
   maxBatchSize: number;
 }
 
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000;
+const MAX_DELAY_MS = 30000;
+
 export class LitmusClient {
   private config: ResolvedConfig;
   private buffer: BufferedEvent[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
+  private consecutiveFailures: number = 0;
+  private backoffTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(config: LitmusConfig) {
     this.config = {
@@ -45,7 +51,41 @@ export class LitmusClient {
       maxBatchSize: 50,
       ...config,
     };
+    this.startInterval();
+  }
+
+  private startInterval() {
     this.timer = setInterval(() => this.flush(), this.config.flushInterval);
+  }
+
+  private clearInterval() {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  private clearBackoffTimer() {
+    if (this.backoffTimer) {
+      clearTimeout(this.backoffTimer);
+      this.backoffTimer = null;
+    }
+  }
+
+  private scheduleBackoffRetry() {
+    this.clearInterval();
+    const delay =
+      Math.min(BASE_DELAY_MS * Math.pow(2, this.consecutiveFailures - 1), MAX_DELAY_MS) +
+      Math.floor(Math.random() * 1000);
+
+    this.backoffTimer = setTimeout(async () => {
+      this.backoffTimer = null;
+      await this.flush();
+      // After the backoff flush completes (success or final drop), restart the interval
+      if (!this.timer) {
+        this.startInterval();
+      }
+    }, delay);
   }
 
   track(event: TrackEvent) {
@@ -79,16 +119,34 @@ export class LitmusClient {
 
       if (!res.ok) {
         console.error(`[litmus] flush failed: ${res.status}`);
-        this.buffer.unshift(...batch);
+        this.handleFailure(batch);
+        return;
       }
     } catch (err) {
       console.error("[litmus] flush error:", err);
-      this.buffer.unshift(...batch);
+      this.handleFailure(batch);
+      return;
     }
+
+    this.consecutiveFailures = 0;
+  }
+
+  private handleFailure(batch: BufferedEvent[]) {
+    this.consecutiveFailures++;
+
+    if (this.consecutiveFailures > MAX_RETRIES) {
+      console.warn("[litmus] batch dropped after 3 retries");
+      return;
+    }
+
+    this.buffer.unshift(...batch);
+    this.scheduleBackoffRetry();
   }
 
   destroy() {
-    if (this.timer) clearInterval(this.timer);
+    this.clearInterval();
+    this.clearBackoffTimer();
+    // Best-effort final flush, no backoff
     this.flush();
   }
 }

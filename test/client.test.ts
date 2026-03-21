@@ -238,6 +238,159 @@ describe("LitmusClient", () => {
     });
   });
 
+  describe("exponential backoff", () => {
+    it("retries with exponential backoff on flush failure", async () => {
+      vi.useFakeTimers();
+      const mock = createMockServer([
+        { status: 500 },
+        { status: 500 },
+        { status: 202 },
+      ]);
+      const client = newClient();
+
+      client.track({ type: "generation", session_id: "s1" });
+
+      // First flush fails, consecutiveFailures = 1
+      await client.flush();
+      expect(mock.requests).toHaveLength(1);
+
+      // Backoff delay for failure 1: min(1000 * 2^0, 30000) + jitter = ~1000-1999ms
+      // Advance past the max possible delay (2000ms) to trigger retry
+      await vi.advanceTimersByTimeAsync(2000);
+
+      // Second flush fires via backoff, also fails, consecutiveFailures = 2
+      expect(mock.requests).toHaveLength(2);
+
+      // Backoff delay for failure 2: min(1000 * 2^1, 30000) + jitter = ~2000-2999ms
+      await vi.advanceTimersByTimeAsync(3000);
+
+      // Third flush fires via backoff, succeeds
+      expect(mock.requests).toHaveLength(3);
+
+      // All three requests should contain the same event (same IDs)
+      const ids = mock.requests.map((r) => r.events[0].id);
+      expect(ids[0]).toBe(ids[1]);
+      expect(ids[1]).toBe(ids[2]);
+
+      client.destroy();
+      mock.restore();
+      vi.useRealTimers();
+    });
+
+    it("drops batch after max retries", async () => {
+      vi.useFakeTimers();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const mock = createMockServer([
+        { status: 500 },
+        { status: 500 },
+        { status: 500 },
+        { status: 500 },
+      ]);
+      const client = newClient();
+
+      client.track({ type: "generation", session_id: "s1" });
+
+      // Flush 1: fails, consecutiveFailures = 1
+      await client.flush();
+      expect(mock.requests).toHaveLength(1);
+
+      // Advance past backoff for failure 1
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(mock.requests).toHaveLength(2);
+
+      // Advance past backoff for failure 2
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(mock.requests).toHaveLength(3);
+
+      // Advance past backoff for failure 3
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mock.requests).toHaveLength(4);
+
+      // After 4th failure (consecutiveFailures > 3), batch is dropped
+      expect(warnSpy).toHaveBeenCalledWith("[litmus] batch dropped after 3 retries");
+
+      // Buffer should be empty now, no more events to send
+      await client.flush();
+      expect(mock.requests).toHaveLength(4);
+
+      client.destroy();
+      mock.restore();
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it("resets backoff counter on success", async () => {
+      vi.useFakeTimers();
+      // Fail once, then succeed, then fail once more
+      const mock = createMockServer([
+        { status: 500 },
+        { status: 202 },
+        { status: 500 },
+        { status: 202 },
+      ]);
+      const client = newClient();
+
+      client.track({ type: "generation", session_id: "s1" });
+
+      // First flush fails
+      await client.flush();
+      expect(mock.requests).toHaveLength(1);
+
+      // Advance past backoff for failure 1: base delay ~1000-1999ms
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(mock.requests).toHaveLength(2); // retry succeeds
+
+      // Track a new event and fail again
+      client.track({ type: "copy", session_id: "s2" });
+      await client.flush();
+      expect(mock.requests).toHaveLength(3); // fails
+
+      // If counter was reset, backoff should be base delay again (~1000-1999ms)
+      // not 2000-2999ms. So advancing 2000ms should be enough.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(mock.requests).toHaveLength(4); // retry succeeds
+
+      client.destroy();
+      mock.restore();
+      vi.useRealTimers();
+    });
+
+    it("pauses regular flush interval during backoff", async () => {
+      vi.useFakeTimers();
+      const mock = createMockServer([
+        { status: 500 },
+        { status: 202 },
+      ]);
+      // Use a short flush interval so we can verify it doesn't fire during backoff
+      const client = newClient({ flushInterval: 500 });
+
+      client.track({ type: "generation", session_id: "s1" });
+
+      // Manually flush, which fails and triggers backoff
+      await client.flush();
+      expect(mock.requests).toHaveLength(1);
+
+      // Track another event while in backoff
+      client.track({ type: "copy", session_id: "s2" });
+
+      // Advance by 500ms (the flush interval). The regular interval should
+      // be paused, so no new flush should fire.
+      await vi.advanceTimersByTimeAsync(500);
+      expect(mock.requests).toHaveLength(1); // no competing flush
+
+      // Advance enough for the backoff timer to fire
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(mock.requests).toHaveLength(2); // backoff retry fired
+
+      // The backoff retry should include both events (original + new one)
+      expect(mock.requests[1].events).toHaveLength(2);
+
+      client.destroy();
+      mock.restore();
+      vi.useRealTimers();
+    });
+  });
+
   describe("request format", () => {
     it("sends correct headers and URL", async () => {
       const mock = createMockServer([]);
