@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { LitmusClient } from "../src/client.js";
-import type { TrackEvent } from "../src/client.js";
+import { LitmusClient } from "../src";
+import type { TrackEvent } from "../src";
 
 // Captures request bodies sent to the mock server.
 interface CapturedRequest {
