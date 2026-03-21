@@ -1,0 +1,27 @@
+
+
+{
+  "name": "@litmus/sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "lint": "oxlint src/",
+    "test": "vitest run --passWithNoTests",
+    "generate": "openapi-typescript ../../contract/openapi.yaml -o src/types/api.gen.ts"
+  },
+  "devDependencies": {
+    "@litmus/tsconfig": "workspace:*",
+    "openapi-typescript": "^7.6.1",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}
