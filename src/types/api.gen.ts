@@ -42,8 +42,12 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @enum {string} */
-        EventType: "$generation" | "$regenerate" | "$copy" | "$edit" | "$abandon" | "$accept" | (string & {});
+        /**
+         * @description Event type identifier. Lowercase a-z, 0-9, underscore, colon only.
+         *     System events use a $ prefix (reserved namespace).
+         *     Known system events: $generation, $regenerate, $copy, $edit, $abandon, $accept.
+         */
+        EventType: string;
         Event: {
             /** @description Unique event ID (UUID) */
             id: string;
