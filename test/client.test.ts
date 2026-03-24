@@ -77,9 +77,9 @@ describe("LitmusClient", () => {
       const client = newClient();
 
       const events: TrackEvent[] = [
-        { type: "generation", session_id: "sess_1" },
-        { type: "copy", session_id: "sess_1" },
-        { type: "regenerate", session_id: "sess_2" },
+        { type: "$generation", session_id: "sess_1" },
+        { type: "$copy", session_id: "sess_1" },
+        { type: "$regenerate", session_id: "sess_2" },
       ];
 
       for (const e of events) {
@@ -120,9 +120,9 @@ describe("LitmusClient", () => {
       const mock = createMockServer([]);
       const client = newClient();
 
-      client.track({ type: "generation", session_id: "s1" });
-      client.track({ type: "generation", session_id: "s1" });
-      client.track({ type: "copy", session_id: "s2" });
+      client.track({ type: "$generation", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
+      client.track({ type: "$copy", session_id: "s2" });
 
       await client.flush();
 
@@ -140,14 +140,14 @@ describe("LitmusClient", () => {
       const mock = createMockServer([]);
       const client = newClient({ maxBatchSize: 3 });
 
-      client.track({ type: "generation", session_id: "s1" });
-      client.track({ type: "copy", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
+      client.track({ type: "$copy", session_id: "s1" });
 
       // Not yet at threshold.
       expect(mock.requests).toHaveLength(0);
 
       // This should trigger auto-flush.
-      client.track({ type: "edit", session_id: "s1" });
+      client.track({ type: "$edit", session_id: "s1" });
 
       // flush() is called synchronously from track(), but the fetch is async.
       // Give it a tick to land.
@@ -180,8 +180,8 @@ describe("LitmusClient", () => {
       const throwing = createThrowingServer();
       const client = newClient();
 
-      client.track({ type: "generation", session_id: "s1" });
-      client.track({ type: "copy", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
+      client.track({ type: "$copy", session_id: "s1" });
 
       // Flush will fail (network error), events should stay in buffer.
       await client.flush();
@@ -203,8 +203,8 @@ describe("LitmusClient", () => {
       const throwing = createThrowingServer();
       const client = newClient();
 
-      client.track({ type: "generation", session_id: "s1" });
-      client.track({ type: "copy", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
+      client.track({ type: "$copy", session_id: "s1" });
 
       // Flush fails.
       await client.flush();
@@ -212,13 +212,13 @@ describe("LitmusClient", () => {
 
       // Track more events after the failure.
       const mock = createMockServer([]);
-      client.track({ type: "edit", session_id: "s1" });
+      client.track({ type: "$edit", session_id: "s1" });
 
       await client.flush();
 
       // Original events should come before the new one.
       const types = mock.requests[0].events.map((e) => e.type);
-      expect(types).toEqual(["generation", "copy", "edit"]);
+      expect(types).toEqual(["$generation", "$copy", "$edit"]);
 
       client.destroy();
       mock.restore();
@@ -230,7 +230,7 @@ describe("LitmusClient", () => {
       const mock = createMockServer([]);
       const client = newClient({ flushInterval: 50 });
 
-      client.track({ type: "generation", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
       client.destroy();
 
       // After destroy, no more automatic flushes should fire.
@@ -258,7 +258,7 @@ describe("LitmusClient", () => {
       ]);
       const client = newClient();
 
-      client.track({ type: "generation", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
 
       // First flush fails, consecutiveFailures = 1
       await client.flush();
@@ -298,7 +298,7 @@ describe("LitmusClient", () => {
       ]);
       const client = newClient();
 
-      client.track({ type: "generation", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
 
       // Flush 1: fails, consecutiveFailures = 1
       await client.flush();
@@ -340,7 +340,7 @@ describe("LitmusClient", () => {
       ]);
       const client = newClient();
 
-      client.track({ type: "generation", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
 
       // First flush fails
       await client.flush();
@@ -351,7 +351,7 @@ describe("LitmusClient", () => {
       expect(mock.requests).toHaveLength(2); // retry succeeds
 
       // Track a new event and fail again
-      client.track({ type: "copy", session_id: "s2" });
+      client.track({ type: "$copy", session_id: "s2" });
       await client.flush();
       expect(mock.requests).toHaveLength(3); // fails
 
@@ -374,14 +374,14 @@ describe("LitmusClient", () => {
       // Use a short flush interval so we can verify it doesn't fire during backoff
       const client = newClient({ flushInterval: 500 });
 
-      client.track({ type: "generation", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
 
       // Manually flush, which fails and triggers backoff
       await client.flush();
       expect(mock.requests).toHaveLength(1);
 
       // Track another event while in backoff
-      client.track({ type: "copy", session_id: "s2" });
+      client.track({ type: "$copy", session_id: "s2" });
 
       // Advance by 500ms (the flush interval). The regular interval should
       // be paused, so no new flush should fire.
@@ -426,7 +426,7 @@ describe("LitmusClient", () => {
 
       expect(mock.requests).toHaveLength(1);
       const event = mock.requests[0].events[0];
-      expect(event.type).toBe("generation");
+      expect(event.type).toBe("$generation");
       expect(event.session_id).toBe("sess_1");
       expect(event.prompt_id).toBe("v1");
       expect(event.generation_id).toBe(result.id);
@@ -456,7 +456,7 @@ describe("LitmusClient", () => {
 
       const gen = client.generation("sess_1");
       client.track({
-        type: "copy",
+        type: "$copy",
         session_id: "sess_1",
         generation_id: gen.id,
       });
@@ -478,7 +478,7 @@ describe("LitmusClient", () => {
       const mock = createMockServer([]);
       const client = newClient();
 
-      client.track({ type: "generation", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
       await client.flush();
 
       const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
@@ -501,7 +501,7 @@ describe("LitmusClient", () => {
       const mock = createMockServer([]);
       const client = newClient();
 
-      client.track({ type: "generation", session_id: "s1" });
+      client.track({ type: "$generation", session_id: "s1" });
       await client.flush();
 
       const timestamp = mock.requests[0].events[0].timestamp;
