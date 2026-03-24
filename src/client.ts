@@ -104,7 +104,7 @@ export class LitmusClient {
   }): { id: string } {
     const generationId = crypto.randomUUID();
     this.track({
-      type: "generation",
+      type: "$generation",
       session_id: sessionId,
       generation_id: generationId,
       prompt_id: opts?.prompt_id,

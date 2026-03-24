@@ -43,7 +43,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /** @enum {string} */
-        EventType: "generation" | "regenerate" | "copy" | "edit" | "abandon" | "accept" | "custom";
+        EventType: "$generation" | "$regenerate" | "$copy" | "$edit" | "$abandon" | "$accept" | (string & {});
         Event: {
             /** @description Unique event ID (UUID) */
             id: string;
