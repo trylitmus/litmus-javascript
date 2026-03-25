@@ -7,6 +7,7 @@ export interface TrackEvent {
   type: EventType;
   session_id: string;
   prompt_id?: string;
+  prompt_version?: string;
   generation_id?: string;
   metadata?: Record<string, unknown>;
 }
@@ -100,6 +101,7 @@ export class LitmusClient {
 
   generation(sessionId: string, opts?: {
     prompt_id?: string;
+    prompt_version?: string;
     metadata?: Record<string, unknown>;
   }): { id: string } {
     const generationId = crypto.randomUUID();
@@ -108,6 +110,7 @@ export class LitmusClient {
       session_id: sessionId,
       generation_id: generationId,
       prompt_id: opts?.prompt_id,
+      prompt_version: opts?.prompt_version,
       metadata: opts?.metadata,
     });
     return { id: generationId };

@@ -56,8 +56,10 @@ export interface components {
             /** @description User session identifier */
             session_id: string;
             type: components["schemas"]["EventType"];
-            /** @description Identifier for the prompt version */
+            /** @description Identifier for the prompt template */
             prompt_id?: string;
+            /** @description Version of the prompt template (set explicitly or auto-hashed) */
+            prompt_version?: string;
             /** @description Identifier for the specific generation */
             generation_id?: string;
             /** @description Arbitrary key-value metadata */
