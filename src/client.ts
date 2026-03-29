@@ -1,11 +1,18 @@
-import type { components } from "./types/api.gen.js";
-
-type EventType = components["schemas"]["EventType"];
+// System event type literals for type safety.
+// v1: core behavioral signals
+// v2: user-initiated + auto-captured
+type SystemEvent =
+  | "$generation" | "$regenerate" | "$copy" | "$edit" | "$abandon" | "$accept"
+  | "$view" | "$partial_copy" | "$refine" | "$followup" | "$rephrase" | "$undo"
+  | "$share" | "$flag" | "$rate" | "$escalate" | "$switch_model" | "$retry_context"
+  | "$post_accept_edit"
+  | "$blur" | "$return" | "$scroll_regression" | "$navigate" | "$interrupt";
 
 /** What the user passes to `track()`. */
 export interface TrackEvent {
-  type: EventType;
+  type: SystemEvent | (string & {});
   session_id: string;
+  user_id?: string;
   prompt_id?: string;
   prompt_version?: string;
   generation_id?: string;
@@ -102,6 +109,7 @@ export class LitmusClient {
   generation(
     sessionId: string,
     opts?: {
+      user_id?: string;
       prompt_id?: string;
       prompt_version?: string;
       metadata?: Record<string, unknown>;
@@ -111,12 +119,79 @@ export class LitmusClient {
     this.track({
       type: "$generation",
       session_id: sessionId,
+      user_id: opts?.user_id,
       generation_id: generationId,
       prompt_id: opts?.prompt_id,
       prompt_version: opts?.prompt_version,
       metadata: opts?.metadata,
     });
     return { id: generationId };
+  }
+
+  /** User explicitly shared AI output. Strongest organic endorsement. */
+  share(sessionId: string, generationId: string, opts?: {
+    user_id?: string;
+    channel?: string;
+    edited_before_share?: boolean;
+    metadata?: Record<string, unknown>;
+  }) {
+    this.track({
+      type: "$share",
+      session_id: sessionId,
+      user_id: opts?.user_id,
+      generation_id: generationId,
+      metadata: { channel: opts?.channel, edited_before_share: opts?.edited_before_share, ...opts?.metadata },
+    });
+  }
+
+  /** User reported output as problematic. Highest-severity negative signal. */
+  flag(sessionId: string, generationId: string, opts?: {
+    user_id?: string;
+    reason?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    this.track({
+      type: "$flag",
+      session_id: sessionId,
+      user_id: opts?.user_id,
+      generation_id: generationId,
+      metadata: { reason: opts?.reason, ...opts?.metadata },
+    });
+  }
+
+  /** User gave explicit feedback (thumbs, stars). Ground truth for calibrating implicit signals. */
+  rate(sessionId: string, generationId: string, value: number, opts?: {
+    user_id?: string;
+    scale?: "binary" | "5-star" | "10-point";
+    metadata?: Record<string, unknown>;
+  }) {
+    this.track({
+      type: "$rate",
+      session_id: sessionId,
+      user_id: opts?.user_id,
+      generation_id: generationId,
+      metadata: { value, scale: opts?.scale ?? "binary", ...opts?.metadata },
+    });
+  }
+
+  /** User came back and edited AFTER accepting. Worse than immediate edit: trust was specifically betrayed. */
+  postAcceptEdit(sessionId: string, generationId: string, opts?: {
+    user_id?: string;
+    edit_distance?: number;
+    time_since_accept_ms?: number;
+    metadata?: Record<string, unknown>;
+  }) {
+    this.track({
+      type: "$post_accept_edit",
+      session_id: sessionId,
+      user_id: opts?.user_id,
+      generation_id: generationId,
+      metadata: {
+        edit_distance: opts?.edit_distance,
+        time_since_accept_ms: opts?.time_since_accept_ms,
+        ...opts?.metadata,
+      },
+    });
   }
 
   async flush(): Promise<void> {
