@@ -7,6 +7,7 @@ interface CapturedEvent {
   id: string;
   type: string;
   session_id: string;
+  user_id?: string;
   timestamp: string;
   generation_id?: string;
   prompt_id?: string;
@@ -458,6 +459,282 @@ describe("LitmusClient", () => {
       expect(events).toHaveLength(2);
       expect(events[0].generation_id).toBe(gen.id);
       expect(events[1].generation_id).toBe(gen.id);
+
+      client.destroy();
+      mock.restore();
+    });
+  });
+
+  describe("fluent generation handle", () => {
+    it("accept() emits $accept with correct generation_id and session_id", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1");
+      gen.accept();
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      expect(events).toHaveLength(2);
+      expect(events[1].type).toBe("$accept");
+      expect(events[1].session_id).toBe("sess_1");
+      expect(events[1].generation_id).toBe(gen.id);
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("edit() includes edit_distance in metadata", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1");
+      gen.edit({ edit_distance: 0.42 });
+      await client.flush();
+
+      const editEvent = mock.requests[0].events[1];
+      expect(editEvent.type).toBe("$edit");
+      expect(editEvent.metadata).toEqual(expect.objectContaining({ edit_distance: 0.42 }));
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("share() includes channel and edited_before_share", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1");
+      gen.share({ channel: "slack", edited_before_share: false });
+      await client.flush();
+
+      const shareEvent = mock.requests[0].events[1];
+      expect(shareEvent.type).toBe("$share");
+      expect(shareEvent.metadata).toEqual(expect.objectContaining({
+        channel: "slack",
+        edited_before_share: false,
+      }));
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("flag() includes reason", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1");
+      gen.flag({ reason: "hallucination" });
+      await client.flush();
+
+      const flagEvent = mock.requests[0].events[1];
+      expect(flagEvent.type).toBe("$flag");
+      expect(flagEvent.metadata).toEqual(expect.objectContaining({ reason: "hallucination" }));
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("rate() includes value and scale", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1");
+      gen.rate(4, { scale: "5-star" });
+      await client.flush();
+
+      const rateEvent = mock.requests[0].events[1];
+      expect(rateEvent.type).toBe("$rate");
+      expect(rateEvent.metadata).toEqual(expect.objectContaining({ value: 4, scale: "5-star" }));
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("rate() defaults scale to binary", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1");
+      gen.rate(1);
+      await client.flush();
+
+      const rateEvent = mock.requests[0].events[1];
+      expect(rateEvent.metadata).toEqual(expect.objectContaining({ scale: "binary" }));
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("postAcceptEdit() includes edit_distance and time_since_accept_ms", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1");
+      gen.postAcceptEdit({ edit_distance: 0.6, time_since_accept_ms: 300000 });
+      await client.flush();
+
+      const paeEvent = mock.requests[0].events[1];
+      expect(paeEvent.type).toBe("$post_accept_edit");
+      expect(paeEvent.metadata).toEqual(expect.objectContaining({
+        edit_distance: 0.6,
+        time_since_accept_ms: 300000,
+      }));
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("chaining multiple signals on one generation", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1");
+      gen.view();
+      gen.edit({ edit_distance: 0.1 });
+      gen.accept();
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      expect(events).toHaveLength(4); // generation + view + edit + accept
+      expect(events.map((e: CapturedEvent) => e.type)).toEqual([
+        "$generation", "$view", "$edit", "$accept",
+      ]);
+      // All events share the same generation_id
+      const genIds = events.map((e: CapturedEvent) => e.generation_id);
+      expect(new Set(genIds).size).toBe(1);
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("carries user_id from generation opts to all subsequent events", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1", { user_id: "user_42" });
+      gen.accept();
+      gen.share({ channel: "email" });
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      for (const e of events) {
+        expect(e.user_id).toBe("user_42");
+      }
+
+      client.destroy();
+      mock.restore();
+    });
+  });
+
+  describe("feature()", () => {
+    it("creates a scoped feature with prompt_id defaulting to feature name", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const contentGen = client.feature("content_gen");
+      const gen = contentGen.generation("sess_1");
+      gen.accept();
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      expect(events[0].prompt_id).toBe("content_gen");
+      expect(events[1].prompt_id).toBe("content_gen");
+      // Feature name is also in metadata
+      expect(events[0].metadata).toEqual(expect.objectContaining({ feature: "content_gen" }));
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("carries model and user_id defaults through", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const topics = client.feature("topic_suggestions", {
+        model: "claude-sonnet",
+        user_id: "user_99",
+      });
+      const gen = topics.generation("sess_1");
+      gen.regenerate();
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      // user_id carried through
+      for (const e of events) {
+        expect(e.user_id).toBe("user_99");
+      }
+      // model in metadata
+      expect(events[0].metadata).toEqual(expect.objectContaining({ model: "claude-sonnet" }));
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("generation-level user_id overrides feature-level", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const feat = client.feature("content_gen", { user_id: "default_user" });
+      const gen = feat.generation("sess_1", { user_id: "specific_user" });
+      gen.accept();
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      for (const e of events) {
+        expect(e.user_id).toBe("specific_user");
+      }
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("feature.track() merges feature defaults", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const feat = client.feature("content_gen", { user_id: "u1" });
+      feat.track({ type: "$abandon", session_id: "sess_1" });
+      await client.flush();
+
+      const event = mock.requests[0].events[0];
+      expect(event.type).toBe("$abandon");
+      expect(event.prompt_id).toBe("content_gen");
+      expect(event.user_id).toBe("u1");
+      expect(event.metadata).toEqual(expect.objectContaining({ feature: "content_gen" }));
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("two features track independently", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const contentGen = client.feature("content_gen", { model: "gpt-4o" });
+      const topics = client.feature("topics", { model: "claude-sonnet" });
+
+      const gen1 = contentGen.generation("sess_1");
+      gen1.accept();
+
+      const gen2 = topics.generation("sess_1");
+      gen2.regenerate();
+      gen2.abandon();
+
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      expect(events).toHaveLength(5); // gen + accept + gen + regen + abandon
+
+      // First feature events
+      expect(events[0].prompt_id).toBe("content_gen");
+      expect(events[1].prompt_id).toBe("content_gen");
+      // Second feature events
+      expect(events[2].prompt_id).toBe("topics");
+      expect(events[3].prompt_id).toBe("topics");
+      expect(events[4].prompt_id).toBe("topics");
+      // Different generation IDs
+      expect(events[0].generation_id).not.toBe(events[2].generation_id);
 
       client.destroy();
       mock.restore();
