@@ -99,11 +99,14 @@ export class LitmusClient {
     }
   }
 
-  generation(sessionId: string, opts?: {
-    prompt_id?: string;
-    prompt_version?: string;
-    metadata?: Record<string, unknown>;
-  }): { id: string } {
+  generation(
+    sessionId: string,
+    opts?: {
+      prompt_id?: string;
+      prompt_version?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): { id: string } {
     const generationId = crypto.randomUUID();
     this.track({
       type: "$generation",

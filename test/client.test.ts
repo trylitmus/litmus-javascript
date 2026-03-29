@@ -94,9 +94,7 @@ describe("LitmusClient", () => {
       expect(firstAttemptIDs).toHaveLength(3);
       // Every event should have a UUID
       for (const id of firstAttemptIDs) {
-        expect(id).toMatch(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-        );
+        expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
       }
 
       // Second flush: server returns 202, same events resent.
@@ -251,11 +249,7 @@ describe("LitmusClient", () => {
   describe("exponential backoff", () => {
     it("retries with exponential backoff on flush failure", async () => {
       vi.useFakeTimers();
-      const mock = createMockServer([
-        { status: 500 },
-        { status: 500 },
-        { status: 202 },
-      ]);
+      const mock = createMockServer([{ status: 500 }, { status: 500 }, { status: 202 }]);
       const client = newClient();
 
       client.track({ type: "$generation", session_id: "s1" });
@@ -367,10 +361,7 @@ describe("LitmusClient", () => {
 
     it("pauses regular flush interval during backoff", async () => {
       vi.useFakeTimers();
-      const mock = createMockServer([
-        { status: 500 },
-        { status: 202 },
-      ]);
+      const mock = createMockServer([{ status: 500 }, { status: 202 }]);
       // Use a short flush interval so we can verify it doesn't fire during backoff
       const client = newClient({ flushInterval: 500 });
 

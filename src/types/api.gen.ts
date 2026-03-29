@@ -4,166 +4,166 @@
  */
 
 export interface paths {
-    "/v1/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Ingest a batch of events */
-        post: operations["ingestEvents"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+  "/v1/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Health check */
-        get: operations["healthCheck"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Ingest a batch of events */
+    post: operations["ingestEvents"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/health": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
+    /** Health check */
+    get: operations["healthCheck"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: {
-        /**
-         * @description Event type identifier. Lowercase a-z, 0-9, underscore, colon only.
-         *     System events use a $ prefix (reserved namespace).
-         *     Known system events: $generation, $regenerate, $copy, $edit, $abandon, $accept.
-         */
-        EventType: string;
-        Event: {
-            /** @description Unique event ID (UUID) */
-            id: string;
-            /** @description Injected by the server from the authenticated token */
-            project_id?: string;
-            /** @description User session identifier */
-            session_id: string;
-            type: components["schemas"]["EventType"];
-            /** @description Identifier for the prompt template */
-            prompt_id?: string;
-            /** @description Version of the prompt template (set explicitly or auto-hashed) */
-            prompt_version?: string;
-            /** @description Identifier for the specific generation */
-            generation_id?: string;
-            /** @description Arbitrary key-value metadata */
-            metadata?: {
-                [key: string]: unknown;
-            };
-            /**
-             * Format: date-time
-             * @description ISO 8601 timestamp. Server defaults to now if omitted.
-             */
-            timestamp?: string;
-        };
-        IngestRequest: {
-            events: components["schemas"]["Event"][];
-        };
-        IngestResponse: {
-            /** @description Number of events accepted */
-            accepted: number;
-        };
-        ErrorResponse: {
-            error: string;
-        };
-        HealthResponse: {
-            /** @enum {string} */
-            status: "ok";
-        };
+  schemas: {
+    /**
+     * @description Event type identifier. Lowercase a-z, 0-9, underscore, colon only.
+     *     System events use a $ prefix (reserved namespace).
+     *     Known system events: $generation, $regenerate, $copy, $edit, $abandon, $accept.
+     */
+    EventType: string;
+    Event: {
+      /** @description Unique event ID (UUID) */
+      id: string;
+      /** @description Injected by the server from the authenticated token */
+      project_id?: string;
+      /** @description User session identifier */
+      session_id: string;
+      type: components["schemas"]["EventType"];
+      /** @description Identifier for the prompt template */
+      prompt_id?: string;
+      /** @description Version of the prompt template (set explicitly or auto-hashed) */
+      prompt_version?: string;
+      /** @description Identifier for the specific generation */
+      generation_id?: string;
+      /** @description Arbitrary key-value metadata */
+      metadata?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Format: date-time
+       * @description ISO 8601 timestamp. Server defaults to now if omitted.
+       */
+      timestamp?: string;
     };
-    responses: never;
-    parameters: never;
-    requestBodies: never;
-    headers: never;
-    pathItems: never;
+    IngestRequest: {
+      events: components["schemas"]["Event"][];
+    };
+    IngestResponse: {
+      /** @description Number of events accepted */
+      accepted: number;
+    };
+    ErrorResponse: {
+      error: string;
+    };
+    HealthResponse: {
+      /** @enum {string} */
+      status: "ok";
+    };
+  };
+  responses: never;
+  parameters: never;
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    ingestEvents: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["IngestRequest"];
-            };
-        };
-        responses: {
-            /** @description Events accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IngestResponse"];
-                };
-            };
-            /** @description Validation error */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Insufficient scope */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
+  ingestEvents: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    healthCheck: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Service is healthy */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IngestRequest"];
+      };
     };
+    responses: {
+      /** @description Events accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IngestResponse"];
+        };
+      };
+      /** @description Validation error */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  healthCheck: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Service is healthy */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HealthResponse"];
+        };
+      };
+    };
+  };
 }
