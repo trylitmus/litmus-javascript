@@ -19,9 +19,10 @@ export interface TrackEvent {
   metadata?: Record<string, unknown>;
 }
 
-/** Internal representation with a stable ID assigned at track() time. */
+/** Internal representation with a stable ID and timestamp assigned at track() time. */
 interface BufferedEvent extends TrackEvent {
   id: string;
+  timestamp: string;
 }
 
 export interface LitmusConfig {
@@ -33,6 +34,10 @@ export interface LitmusConfig {
   flushInterval?: number;
   /** Max events before auto-flush. Default: 50 */
   maxBatchSize?: number;
+  /** Max events to hold in the buffer. Oldest dropped when exceeded. Default: 10000 */
+  maxQueueSize?: number;
+  /** Disable page lifecycle hooks (pagehide/visibilitychange). Default: false */
+  disablePageLifecycle?: boolean;
 }
 
 interface ResolvedConfig {
@@ -40,6 +45,8 @@ interface ResolvedConfig {
   apiKey: string;
   flushInterval: number;
   maxBatchSize: number;
+  maxQueueSize: number;
+  disablePageLifecycle: boolean;
 }
 
 /** Defaults that a Feature or Generation carries so callers don't repeat themselves. */
@@ -165,9 +172,85 @@ export class Feature {
   }
 }
 
-const MAX_RETRIES = 3;
+// ---------------------------------------------------------------------------
+// Transport
+// ---------------------------------------------------------------------------
+
+/** The 64KB fetch keepalive budget, with 80% safety margin like PostHog. */
+const FETCH_KEEPALIVE_LIMIT = 51_200;
+
+interface SendResult {
+  ok: boolean;
+  status: number;
+  retryAfter?: number;
+}
+
+function buildPayload(events: BufferedEvent[], apiKey: string): { url_suffix: string; body: string; headers: Record<string, string> } {
+  const body = JSON.stringify({ events });
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  };
+  return { url_suffix: "/v1/events", body, headers };
+}
+
+/**
+ * Send via fetch. Used for normal flushes.
+ * Sets keepalive: true when the payload is small enough (helps during page transitions).
+ */
+async function sendFetch(endpoint: string, events: BufferedEvent[], apiKey: string): Promise<SendResult> {
+  const { url_suffix, body, headers } = buildPayload(events, apiKey);
+  const useKeepalive = body.length < FETCH_KEEPALIVE_LIMIT;
+
+  const res = await globalThis.fetch(`${endpoint}${url_suffix}`, {
+    method: "POST",
+    headers,
+    body,
+    keepalive: useKeepalive,
+  });
+
+  const retryAfter = parseRetryAfter(res.headers.get("Retry-After"));
+  return { ok: res.ok, status: res.status, retryAfter };
+}
+
+/**
+ * Send via navigator.sendBeacon. Used during page unload.
+ * sendBeacon is fire-and-forget, best-effort. Returns true if the browser accepted it.
+ */
+function sendBeacon(endpoint: string, events: BufferedEvent[], apiKey: string): boolean {
+  if (typeof navigator === "undefined" || typeof navigator.sendBeacon !== "function") {
+    return false;
+  }
+
+  const { url_suffix, body } = buildPayload(events, apiKey);
+  // sendBeacon can't set custom headers, so we pass the API key as ?token=.
+  // The ingest server accepts this as an alternative to Authorization: Bearer.
+  // Blob wrapping is required for sendBeacon to set Content-Type correctly.
+  const blob = new Blob([body], { type: "application/json" });
+  try {
+    return navigator.sendBeacon(`${endpoint}${url_suffix}?token=${encodeURIComponent(apiKey)}`, blob);
+  } catch {
+    return false;
+  }
+}
+
+function parseRetryAfter(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Client
+// ---------------------------------------------------------------------------
+
+const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 1000;
-const MAX_DELAY_MS = 30000;
+const MAX_DELAY_MS = 30_000;
+const DEFAULT_FLUSH_INTERVAL = 5000;
+const DEFAULT_MAX_BATCH_SIZE = 50;
+const DEFAULT_MAX_QUEUE_SIZE = 10_000;
 
 export class LitmusClient {
   private config: ResolvedConfig;
@@ -175,15 +258,96 @@ export class LitmusClient {
   private timer: ReturnType<typeof setInterval> | null = null;
   private consecutiveFailures: number = 0;
   private backoffTimer: ReturnType<typeof setTimeout> | null = null;
+  private online: boolean = true;
+  private destroyed: boolean = false;
+
+  // Bound listeners so we can remove them on destroy.
+  private boundPageHide: (() => void) | null = null;
+  private boundVisibilityChange: (() => void) | null = null;
+  private boundOnline: (() => void) | null = null;
+  private boundOffline: (() => void) | null = null;
 
   constructor(config: LitmusConfig) {
     this.config = {
-      flushInterval: 5000,
-      maxBatchSize: 50,
-      ...config,
+      flushInterval: config.flushInterval ?? DEFAULT_FLUSH_INTERVAL,
+      maxBatchSize: config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE,
+      maxQueueSize: config.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE,
+      disablePageLifecycle: config.disablePageLifecycle ?? false,
+      endpoint: config.endpoint,
+      apiKey: config.apiKey,
     };
+
+    this.online = typeof navigator !== "undefined" ? (navigator.onLine ?? true) : true;
     this.startInterval();
+
+    if (!this.config.disablePageLifecycle && typeof window !== "undefined") {
+      this.registerLifecycleListeners();
+    }
   }
+
+  // -----------------------------------------------------------------------
+  // Page lifecycle
+  // -----------------------------------------------------------------------
+
+  private registerLifecycleListeners() {
+    // Prefer pagehide over unload (better bfcache compat, fires more reliably on mobile).
+    const unloadEvent = "onpagehide" in globalThis ? "pagehide" : "unload";
+    this.boundPageHide = () => this.handleUnload();
+    window.addEventListener(unloadEvent, this.boundPageHide, { passive: false } as AddEventListenerOptions);
+
+    this.boundVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        this.flush();
+      }
+    };
+    document.addEventListener("visibilitychange", this.boundVisibilityChange);
+
+    // Online/offline awareness.
+    this.boundOnline = () => {
+      this.online = true;
+      // Back online, flush anything that piled up.
+      this.flush();
+    };
+    this.boundOffline = () => {
+      this.online = false;
+    };
+    window.addEventListener("online", this.boundOnline);
+    window.addEventListener("offline", this.boundOffline);
+  }
+
+  private removeLifecycleListeners() {
+    if (this.boundPageHide) {
+      const unloadEvent = "onpagehide" in globalThis ? "pagehide" : "unload";
+      window.removeEventListener(unloadEvent, this.boundPageHide);
+      this.boundPageHide = null;
+    }
+    if (this.boundVisibilityChange) {
+      document.removeEventListener("visibilitychange", this.boundVisibilityChange);
+      this.boundVisibilityChange = null;
+    }
+    if (this.boundOnline) {
+      window.removeEventListener("online", this.boundOnline);
+      this.boundOnline = null;
+    }
+    if (this.boundOffline) {
+      window.removeEventListener("offline", this.boundOffline);
+      this.boundOffline = null;
+    }
+  }
+
+  /**
+   * Last-ditch flush during page unload.
+   * Uses sendBeacon (fire-and-forget) since async fetch won't complete.
+   */
+  private handleUnload() {
+    if (this.buffer.length === 0) return;
+    const batch = this.buffer.splice(0);
+    sendBeacon(this.config.endpoint, batch, this.config.apiKey);
+  }
+
+  // -----------------------------------------------------------------------
+  // Timer management
+  // -----------------------------------------------------------------------
 
   private startInterval() {
     this.timer = setInterval(() => this.flush(), this.config.flushInterval);
@@ -203,27 +367,43 @@ export class LitmusClient {
     }
   }
 
-  private scheduleBackoffRetry() {
+  private scheduleBackoffRetry(delayOverride?: number) {
     this.clearInterval();
-    const delay =
+    const delay = delayOverride ??
       Math.min(BASE_DELAY_MS * Math.pow(2, this.consecutiveFailures - 1), MAX_DELAY_MS) +
       Math.floor(Math.random() * 1000);
 
     this.backoffTimer = setTimeout(async () => {
       this.backoffTimer = null;
       await this.flush();
-      // After the backoff flush completes (success or final drop), restart the interval
-      if (!this.timer) {
+      if (!this.timer && !this.destroyed) {
         this.startInterval();
       }
     }, delay);
   }
 
+  // -----------------------------------------------------------------------
+  // Public API
+  // -----------------------------------------------------------------------
+
   track(event: TrackEvent) {
-    // ID is assigned here, not at flush time. This means retries
-    // resend the same event with the same UUID, enabling server-side
-    // idempotent ingestion via ON CONFLICT (id) DO NOTHING.
-    this.buffer.push({ ...event, id: crypto.randomUUID() });
+    if (this.destroyed) return;
+
+    this.buffer.push({
+      ...event,
+      id: crypto.randomUUID(),
+      // Timestamp at track time, not flush time. If the user accepts a generation
+      // and the flush fires 5s later, we want the accept timestamp, not the flush timestamp.
+      timestamp: new Date().toISOString(),
+    });
+
+    // Evict oldest events if we've exceeded the queue cap.
+    if (this.buffer.length > this.config.maxQueueSize) {
+      const overflow = this.buffer.length - this.config.maxQueueSize;
+      this.buffer.splice(0, overflow);
+      console.warn(`[litmus] queue full, dropped ${overflow} oldest event(s)`);
+    }
+
     if (this.buffer.length >= this.config.maxBatchSize) {
       this.flush();
     }
@@ -232,8 +412,6 @@ export class LitmusClient {
   /**
    * Create a scoped feature handle. Carries defaults so you don't
    * repeat prompt_id, model, etc. on every call.
-   *
-   *   const contentGen = litmus.feature("content_gen", { model: "gpt-4o" });
    */
   feature(name: string, defaults?: Omit<FeatureDefaults, "prompt_id">): Feature {
     return new Feature(this, name, { ...defaults, prompt_id: name });
@@ -241,10 +419,6 @@ export class LitmusClient {
 
   /**
    * Track a generation event and return a fluent handle for subsequent signals.
-   *
-   *   const gen = litmus.generation(sessionId);
-   *   gen.accept();
-   *   gen.edit({ edit_distance: 0.3 });
    */
   generation(sessionId: string, opts?: FeatureDefaults & {
     prompt_version?: string;
@@ -272,55 +446,121 @@ export class LitmusClient {
     return new Generation(this, sessionId, generationId, defaults);
   }
 
+  /**
+   * Attach to an existing generation created by a backend SDK.
+   * Returns a Generation handle for recording behavioral signals
+   * without re-emitting the $generation event.
+   *
+   * Typical flow:
+   *   1. Backend (Python) calls litmus.generation(), returns gen.id in the API response
+   *   2. Frontend calls litmus.attach(generationId, sessionId) to get a handle
+   *   3. Frontend records signals: gen.accept(), gen.edit(), etc.
+   *
+   *   const gen = litmus.attach(response.generation_id, sessionId);
+   *   gen.accept();
+   */
+  attach(generationId: string, sessionId: string, opts?: Omit<FeatureDefaults, "model">): Generation {
+    return new Generation(this, sessionId, generationId, {
+      user_id: opts?.user_id,
+      prompt_id: opts?.prompt_id,
+      prompt_version: opts?.prompt_version,
+      metadata: opts?.metadata,
+    });
+  }
+
   async flush(): Promise<void> {
     if (this.buffer.length === 0) return;
 
+    // Don't flush while offline, events stay buffered.
+    if (!this.online) return;
+
     const batch = this.buffer.splice(0);
-    const events = batch.map((e) => ({
-      ...e,
-      timestamp: new Date().toISOString(),
-    }));
 
     try {
-      const res = await fetch(`${this.config.endpoint}/v1/events`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.config.apiKey}`,
-        },
-        body: JSON.stringify({ events }),
-      });
+      const result = await sendFetch(this.config.endpoint, batch, this.config.apiKey);
 
-      if (!res.ok) {
-        console.error(`[litmus] flush failed: ${res.status}`);
-        this.handleFailure(batch);
+      if (result.ok) {
+        this.consecutiveFailures = 0;
         return;
       }
-    } catch (err) {
-      console.error("[litmus] flush error:", err);
-      this.handleFailure(batch);
+
+      this.handleFailure(batch, result.status, result.retryAfter);
+    } catch {
+      // Network error (offline, DNS failure, etc.)
+      this.handleFailure(batch, 0);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Failure handling
+  //
+  // Match the ingest server's status codes:
+  //   400 = bad JSON / validation    -> never retry, client bug
+  //   401 = unauthorized             -> never retry, bad API key
+  //   403 = insufficient scope       -> never retry, wrong key type
+  //   413 = payload too large        -> halve batch and retry immediately
+  //   429 = rate limited             -> retry after Retry-After header
+  //   5xx / network error (0)        -> retry with exponential backoff
+  // -----------------------------------------------------------------------
+
+  private handleFailure(batch: BufferedEvent[], status: number, retryAfterMs?: number) {
+    // Client errors (except 413/429): the request is malformed, retrying won't help.
+    if (status >= 400 && status < 500 && status !== 413 && status !== 429) {
+      console.error(`[litmus] batch permanently rejected (${status}), ${batch.length} event(s) dropped`);
       return;
     }
 
-    this.consecutiveFailures = 0;
-  }
+    // 413: payload too large. Halve the batch and retry both halves on the next tick.
+    // We use setTimeout(0) instead of a direct this.flush() call to avoid a tight
+    // recursive loop if the server keeps returning 413 on the smaller batches.
+    if (status === 413) {
+      if (batch.length <= 1) {
+        console.error("[litmus] single event too large for ingest, dropped");
+        return;
+      }
+      const mid = Math.ceil(batch.length / 2);
+      // Put both halves back at the front, they'll flush in subsequent cycles.
+      this.buffer.unshift(...batch.slice(0, mid), ...batch.slice(mid));
+      console.warn(`[litmus] batch too large, splitting into chunks of ~${mid}`);
+      setTimeout(() => this.flush(), 0);
+      return;
+    }
 
-  private handleFailure(batch: BufferedEvent[]) {
     this.consecutiveFailures++;
 
     if (this.consecutiveFailures > MAX_RETRIES) {
-      console.warn("[litmus] batch dropped after 3 retries");
+      console.warn(`[litmus] batch dropped after ${MAX_RETRIES} retries`);
+      this.consecutiveFailures = 0;
       return;
     }
 
+    // Put events back at the front so order is preserved.
     this.buffer.unshift(...batch);
+
+    // 429: respect the server's Retry-After.
+    if (status === 429 && retryAfterMs) {
+      this.scheduleBackoffRetry(retryAfterMs);
+      return;
+    }
+
     this.scheduleBackoffRetry();
   }
 
   destroy() {
+    this.destroyed = true;
     this.clearInterval();
     this.clearBackoffTimer();
-    // Best-effort final flush, no backoff
-    this.flush();
+    this.removeLifecycleListeners();
+
+    // Best-effort synchronous flush via sendBeacon if there's anything left.
+    if (this.buffer.length > 0) {
+      const batch = this.buffer.splice(0);
+      if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+        sendBeacon(this.config.endpoint, batch, this.config.apiKey);
+      } else {
+        // Server-side or test env: fire-and-forget fetch.
+        sendFetch(this.config.endpoint, batch, this.config.apiKey).catch(() => {});
+      }
+    }
   }
 }

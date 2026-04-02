@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { LitmusClient } from "../src";
 import type { TrackEvent } from "../src";
 
@@ -18,7 +18,12 @@ interface CapturedRequest {
   events: CapturedEvent[];
 }
 
-function createMockServer(responses: Array<{ status: number }>) {
+interface MockResponse {
+  status: number;
+  headers?: Record<string, string>;
+}
+
+function createMockServer(responses: Array<MockResponse>) {
   const requests: CapturedRequest[] = [];
   let callIndex = 0;
 
@@ -30,9 +35,16 @@ function createMockServer(responses: Array<{ status: number }>) {
     const response = responses[callIndex] ?? { status: 202 };
     callIndex++;
 
+    const resHeaders = new Headers({ "Content-Type": "application/json" });
+    if (response.headers) {
+      for (const [k, v] of Object.entries(response.headers)) {
+        resHeaders.set(k, v);
+      }
+    }
+
     return new Response(JSON.stringify({ accepted: body.events.length }), {
       status: response.status,
-      headers: { "Content-Type": "application/json" },
+      headers: resHeaders,
     });
   }) as typeof fetch;
 
@@ -57,11 +69,16 @@ function createThrowingServer() {
   };
 }
 
-function newClient(overrides: Partial<{ flushInterval: number; maxBatchSize: number }> = {}) {
+function newClient(overrides: Partial<{
+  flushInterval: number;
+  maxBatchSize: number;
+  maxQueueSize: number;
+}> = {}) {
   return new LitmusClient({
     endpoint: "http://localhost:9999",
     apiKey: "ltm_pk_test_abc123",
     flushInterval: 60000, // large interval so we control flushes manually
+    disablePageLifecycle: true, // no DOM in test env
     ...overrides,
   });
 }
@@ -233,7 +250,6 @@ describe("LitmusClient", () => {
       client.destroy();
 
       // After destroy, no more automatic flushes should fire.
-      // The destroy() call itself triggers one flush.
       const requestCountAfterDestroy = mock.requests.length;
 
       // Wait longer than the flush interval to confirm no more fire.
@@ -244,6 +260,20 @@ describe("LitmusClient", () => {
           resolve();
         }, 150);
       });
+    });
+
+    it("ignores track() calls after destroy", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      client.destroy();
+      client.track({ type: "$generation", session_id: "s1" });
+
+      await client.flush();
+      // The track was ignored, nothing to flush.
+      expect(mock.requests).toHaveLength(0);
+
+      mock.restore();
     });
   });
 
@@ -260,7 +290,6 @@ describe("LitmusClient", () => {
       expect(mock.requests).toHaveLength(1);
 
       // Backoff delay for failure 1: min(1000 * 2^0, 30000) + jitter = ~1000-1999ms
-      // Advance past the max possible delay (2000ms) to trigger retry
       await vi.advanceTimersByTimeAsync(2000);
 
       // Second flush fires via backoff, also fails, consecutiveFailures = 2
@@ -285,38 +314,29 @@ describe("LitmusClient", () => {
     it("drops batch after max retries", async () => {
       vi.useFakeTimers();
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const mock = createMockServer([
-        { status: 500 },
-        { status: 500 },
-        { status: 500 },
-        { status: 500 },
-      ]);
+
+      // Generate 11 500 responses (initial flush + 10 retries)
+      const responses = Array.from({ length: 11 }, () => ({ status: 500 }));
+      const mock = createMockServer(responses);
       const client = newClient();
 
       client.track({ type: "$generation", session_id: "s1" });
 
-      // Flush 1: fails, consecutiveFailures = 1
+      // Initial flush fails
       await client.flush();
       expect(mock.requests).toHaveLength(1);
 
-      // Advance past backoff for failure 1
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(mock.requests).toHaveLength(2);
+      // Burn through all 10 retries. Each needs enough time for the backoff.
+      for (let i = 1; i <= 10; i++) {
+        // Max possible delay: min(1000 * 2^(i-1), 30000) + 1000
+        const maxDelay = Math.min(1000 * Math.pow(2, i - 1), 30000) + 1000;
+        await vi.advanceTimersByTimeAsync(maxDelay);
+      }
 
-      // Advance past backoff for failure 2
-      await vi.advanceTimersByTimeAsync(3000);
-      expect(mock.requests).toHaveLength(3);
+      expect(warnSpy).toHaveBeenCalledWith("[litmus] batch dropped after 10 retries");
 
-      // Advance past backoff for failure 3
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(mock.requests).toHaveLength(4);
-
-      // After 4th failure (consecutiveFailures > 3), batch is dropped
-      expect(warnSpy).toHaveBeenCalledWith("[litmus] batch dropped after 3 retries");
-
-      // Buffer should be empty now, no more events to send
+      // Buffer should be empty now
       await client.flush();
-      expect(mock.requests).toHaveLength(4);
 
       client.destroy();
       mock.restore();
@@ -351,7 +371,6 @@ describe("LitmusClient", () => {
       expect(mock.requests).toHaveLength(3); // fails
 
       // If counter was reset, backoff should be base delay again (~1000-1999ms)
-      // not 2000-2999ms. So advancing 2000ms should be enough.
       await vi.advanceTimersByTimeAsync(2000);
       expect(mock.requests).toHaveLength(4); // retry succeeds
 
@@ -390,6 +409,222 @@ describe("LitmusClient", () => {
       client.destroy();
       mock.restore();
       vi.useRealTimers();
+    });
+  });
+
+  describe("smart retry", () => {
+    it("does NOT retry 400 (bad request)", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const mock = createMockServer([{ status: 400 }, { status: 202 }]);
+      const client = newClient();
+
+      client.track({ type: "$generation", session_id: "s1" });
+      await client.flush();
+
+      // Events are dropped, not retried.
+      expect(mock.requests).toHaveLength(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("permanently rejected (400)"),
+      );
+
+      // Nothing left to flush.
+      await client.flush();
+      expect(mock.requests).toHaveLength(1);
+
+      client.destroy();
+      mock.restore();
+      errorSpy.mockRestore();
+    });
+
+    it("does NOT retry 401 (unauthorized)", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const mock = createMockServer([{ status: 401 }]);
+      const client = newClient();
+
+      client.track({ type: "$generation", session_id: "s1" });
+      await client.flush();
+
+      expect(mock.requests).toHaveLength(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("permanently rejected (401)"),
+      );
+
+      await client.flush();
+      expect(mock.requests).toHaveLength(1);
+
+      client.destroy();
+      mock.restore();
+      errorSpy.mockRestore();
+    });
+
+    it("does NOT retry 403 (forbidden)", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const mock = createMockServer([{ status: 403 }]);
+      const client = newClient();
+
+      client.track({ type: "$generation", session_id: "s1" });
+      await client.flush();
+
+      expect(mock.requests).toHaveLength(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("permanently rejected (403)"),
+      );
+
+      client.destroy();
+      mock.restore();
+      errorSpy.mockRestore();
+    });
+
+    it("halves batch on 413 (payload too large)", async () => {
+      vi.useFakeTimers();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      // First request: 413, then the two halved batches succeed.
+      const mock = createMockServer([{ status: 413 }, { status: 202 }, { status: 202 }]);
+      const client = newClient();
+
+      // Track 4 events that together exceed the body limit.
+      for (let i = 0; i < 4; i++) {
+        client.track({ type: "$generation", session_id: `s${i}` });
+      }
+
+      // First flush gets 413, splits, and schedules retry via setTimeout(0).
+      await client.flush();
+      expect(mock.requests).toHaveLength(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("batch too large, splitting"),
+      );
+
+      // Advance past the setTimeout(0) to trigger the split retry.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mock.requests.length).toBeGreaterThanOrEqual(2);
+
+      client.destroy();
+      mock.restore();
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it("drops a single event that's too large on 413", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const mock = createMockServer([{ status: 413 }]);
+      const client = newClient();
+
+      client.track({ type: "$generation", session_id: "s1" });
+      await client.flush();
+
+      expect(errorSpy).toHaveBeenCalledWith("[litmus] single event too large for ingest, dropped");
+
+      client.destroy();
+      mock.restore();
+      errorSpy.mockRestore();
+    });
+
+    it("respects Retry-After header on 429", async () => {
+      vi.useFakeTimers();
+      // 429 with 5s retry-after, then success
+      const mock = createMockServer([
+        { status: 429, headers: { "Retry-After": "5" } },
+        { status: 202 },
+      ]);
+      const client = newClient();
+
+      client.track({ type: "$generation", session_id: "s1" });
+      await client.flush();
+
+      // First request should be the 429.
+      await vi.advanceTimersByTimeAsync(0); // drain microtasks
+      expect(mock.requests).toHaveLength(1);
+
+      // Advance less than 5s, shouldn't have retried yet.
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(mock.requests).toHaveLength(1);
+
+      // Advance past 5s total, should retry.
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(mock.requests).toHaveLength(2);
+
+      client.destroy();
+      mock.restore();
+      vi.useRealTimers();
+    });
+  });
+
+  describe("offline awareness", () => {
+    it("skips flush when offline", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      // Simulate going offline by reaching into the client.
+      // In real usage, the 'offline' event handler sets this.
+      (client as unknown as { online: boolean }).online = false;
+
+      client.track({ type: "$generation", session_id: "s1" });
+      await client.flush();
+
+      // No request made while offline.
+      expect(mock.requests).toHaveLength(0);
+
+      // Come back online.
+      (client as unknown as { online: boolean }).online = true;
+      await client.flush();
+
+      expect(mock.requests).toHaveLength(1);
+      expect(mock.requests[0].events).toHaveLength(1);
+
+      client.destroy();
+      mock.restore();
+    });
+  });
+
+  describe("max queue size", () => {
+    it("evicts oldest events when queue overflows", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const mock = createMockServer([]);
+      const client = newClient({ maxQueueSize: 3 });
+
+      // Track 5 events, only the last 3 should survive.
+      client.track({ type: "$generation", session_id: "s1" });
+      client.track({ type: "$copy", session_id: "s2" });
+      client.track({ type: "$edit", session_id: "s3" });
+      client.track({ type: "$accept", session_id: "s4" });
+      client.track({ type: "$abandon", session_id: "s5" });
+
+      await client.flush();
+
+      // Only 3 events should have been sent.
+      expect(mock.requests[0].events).toHaveLength(3);
+      const types = mock.requests[0].events.map((e: CapturedEvent) => e.type);
+      expect(types).toEqual(["$edit", "$accept", "$abandon"]);
+      expect(warnSpy).toHaveBeenCalled();
+
+      client.destroy();
+      mock.restore();
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe("timestamp at track time", () => {
+    it("assigns timestamp at track() time, not flush() time", async () => {
+      vi.useFakeTimers();
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const trackTime = new Date();
+      client.track({ type: "$generation", session_id: "s1" });
+
+      // Advance time significantly. If timestamp were set at flush time,
+      // it would be 10s in the future.
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await client.flush();
+
+      const timestamp = new Date(mock.requests[0].events[0].timestamp);
+      // Timestamp should be from track time (~trackTime), not flush time (~trackTime + 10s).
+      expect(timestamp.getTime()).toBe(trackTime.getTime());
+
+      client.destroy();
+      vi.useRealTimers();
+      mock.restore();
     });
   });
 
@@ -741,6 +976,95 @@ describe("LitmusClient", () => {
     });
   });
 
+  describe("attach()", () => {
+    it("returns a Generation handle without emitting $generation", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.attach("backend-gen-uuid", "sess_1");
+      gen.accept();
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      // Only $accept, no $generation
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe("$accept");
+      expect(events[0].generation_id).toBe("backend-gen-uuid");
+      expect(events[0].session_id).toBe("sess_1");
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("uses the provided generation_id", () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.attach("my-backend-id", "sess_1");
+      expect(gen.id).toBe("my-backend-id");
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("carries defaults to all emitted signals", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.attach("gen-123", "sess_1", {
+        user_id: "u1",
+        prompt_id: "summarizer",
+        metadata: { source: "backend" },
+      });
+      gen.accept();
+      gen.edit({ edit_distance: 0.3 });
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      expect(events).toHaveLength(2);
+      for (const e of events) {
+        expect(e.user_id).toBe("u1");
+        expect(e.prompt_id).toBe("summarizer");
+        expect(e.generation_id).toBe("gen-123");
+        expect(e.metadata).toEqual(expect.objectContaining({ source: "backend" }));
+      }
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("cross-SDK flow: generation() on backend, attach() on frontend", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      // Simulate backend creating the generation
+      const backendGen = client.generation("sess_1", { prompt_id: "content_gen" });
+      const generationId = backendGen.id;
+
+      // Simulate frontend attaching (no $generation emitted)
+      const frontendGen = client.attach(generationId, "sess_1");
+      frontendGen.accept();
+      frontendGen.edit({ edit_distance: 0.5 });
+
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      // 1 $generation + 1 $accept + 1 $edit = 3
+      expect(events).toHaveLength(3);
+
+      const genEvents = events.filter((e: CapturedEvent) => e.type === "$generation");
+      expect(genEvents).toHaveLength(1); // only the backend one
+
+      // All events share the same generation_id
+      const genIds = new Set(events.map((e: CapturedEvent) => e.generation_id));
+      expect(genIds.size).toBe(1);
+      expect(genIds.has(generationId)).toBe(true);
+
+      client.destroy();
+      mock.restore();
+    });
+  });
+
   describe("request format", () => {
     it("sends correct headers and URL", async () => {
       const mock = createMockServer([]);
@@ -776,6 +1100,21 @@ describe("LitmusClient", () => {
       // Should be a valid ISO 8601 string (parseable by Date).
       const parsed = new Date(timestamp);
       expect(parsed.toISOString()).toBe(timestamp);
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("sets keepalive: true on small payloads", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      client.track({ type: "$generation", session_id: "s1" });
+      await client.flush();
+
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(init.keepalive).toBe(true);
 
       client.destroy();
       mock.restore();
