@@ -260,6 +260,7 @@ export class LitmusClient {
   private backoffTimer: ReturnType<typeof setTimeout> | null = null;
   private online: boolean = true;
   private destroyed: boolean = false;
+  private flushing: boolean = false;
 
   // Bound listeners so we can remove them on destroy.
   private boundPageHide: (() => void) | null = null;
@@ -369,6 +370,7 @@ export class LitmusClient {
 
   private scheduleBackoffRetry(delayOverride?: number) {
     this.clearInterval();
+    this.clearBackoffTimer();
     const delay = delayOverride ??
       Math.min(BASE_DELAY_MS * Math.pow(2, this.consecutiveFailures - 1), MAX_DELAY_MS) +
       Math.floor(Math.random() * 1000);
@@ -470,11 +472,18 @@ export class LitmusClient {
 
   async flush(): Promise<void> {
     if (this.buffer.length === 0) return;
-
-    // Don't flush while offline, events stay buffered.
+    if (this.destroyed) return;
     if (!this.online) return;
 
-    const batch = this.buffer.splice(0);
+    // Prevent concurrent flushes from racing. If two failures both unshift
+    // their batches back, the order depends on which resolves first.
+    if (this.flushing) return;
+    this.flushing = true;
+
+    // Take at most maxBatchSize events. This is important for the 413 split
+    // path: after splitting a batch and putting halves back, the next flush
+    // should only grab one half, not the entire buffer again.
+    const batch = this.buffer.splice(0, this.config.maxBatchSize);
 
     try {
       const result = await sendFetch(this.config.endpoint, batch, this.config.apiKey);
@@ -488,6 +497,8 @@ export class LitmusClient {
     } catch {
       // Network error (offline, DNS failure, etc.)
       this.handleFailure(batch, 0);
+    } finally {
+      this.flushing = false;
     }
   }
 
