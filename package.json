@@ -1,5 +1,5 @@
 {
-  "name": "@litmus/sdk",
+  "name": "@trylitmus/sdk",
   "version": "0.1.0",
   "files": [
     "dist"
