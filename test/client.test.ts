@@ -700,13 +700,13 @@ describe("LitmusClient", () => {
     });
   });
 
-  describe("fluent generation handle", () => {
-    it("accept() emits $accept with correct generation_id and session_id", async () => {
+  describe("generation.event()", () => {
+    it("emits $accept with correct generation_id and session_id", async () => {
       const mock = createMockServer([]);
       const client = newClient();
 
       const gen = client.generation("sess_1");
-      gen.accept();
+      gen.event("$accept");
       await client.flush();
 
       const events = mock.requests[0].events;
@@ -719,12 +719,12 @@ describe("LitmusClient", () => {
       mock.restore();
     });
 
-    it("edit() includes edit_distance in metadata", async () => {
+    it("passes metadata through", async () => {
       const mock = createMockServer([]);
       const client = newClient();
 
       const gen = client.generation("sess_1");
-      gen.edit({ edit_distance: 0.42 });
+      gen.event("$edit", { edit_distance: 0.42 });
       await client.flush();
 
       const editEvent = mock.requests[0].events[1];
@@ -735,86 +735,36 @@ describe("LitmusClient", () => {
       mock.restore();
     });
 
-    it("share() includes channel and edited_before_share", async () => {
+    it("works with any system event type", async () => {
       const mock = createMockServer([]);
       const client = newClient();
 
       const gen = client.generation("sess_1");
-      gen.share({ channel: "slack", edited_before_share: false });
+      gen.event("$share", { channel: "slack", edited_before_share: false });
+      gen.event("$flag", { reason: "hallucination" });
+      gen.event("$rate", { value: 4, scale: "5-star" });
+      gen.event("$post_accept_edit", { edit_distance: 0.6, time_since_accept_ms: 300000 });
       await client.flush();
 
-      const shareEvent = mock.requests[0].events[1];
-      expect(shareEvent.type).toBe("$share");
-      expect(shareEvent.metadata).toEqual(expect.objectContaining({
-        channel: "slack",
-        edited_before_share: false,
-      }));
+      const events = mock.requests[0].events;
+      const types = events.map((e: CapturedEvent) => e.type);
+      expect(types).toEqual(["$generation", "$share", "$flag", "$rate", "$post_accept_edit"]);
 
       client.destroy();
       mock.restore();
     });
 
-    it("flag() includes reason", async () => {
+    it("works with custom event types", async () => {
       const mock = createMockServer([]);
       const client = newClient();
 
       const gen = client.generation("sess_1");
-      gen.flag({ reason: "hallucination" });
+      gen.event("thumbs_down", { reason: "wrong_tone" });
       await client.flush();
 
-      const flagEvent = mock.requests[0].events[1];
-      expect(flagEvent.type).toBe("$flag");
-      expect(flagEvent.metadata).toEqual(expect.objectContaining({ reason: "hallucination" }));
-
-      client.destroy();
-      mock.restore();
-    });
-
-    it("rate() includes value and scale", async () => {
-      const mock = createMockServer([]);
-      const client = newClient();
-
-      const gen = client.generation("sess_1");
-      gen.rate(4, { scale: "5-star" });
-      await client.flush();
-
-      const rateEvent = mock.requests[0].events[1];
-      expect(rateEvent.type).toBe("$rate");
-      expect(rateEvent.metadata).toEqual(expect.objectContaining({ value: 4, scale: "5-star" }));
-
-      client.destroy();
-      mock.restore();
-    });
-
-    it("rate() defaults scale to binary", async () => {
-      const mock = createMockServer([]);
-      const client = newClient();
-
-      const gen = client.generation("sess_1");
-      gen.rate(1);
-      await client.flush();
-
-      const rateEvent = mock.requests[0].events[1];
-      expect(rateEvent.metadata).toEqual(expect.objectContaining({ scale: "binary" }));
-
-      client.destroy();
-      mock.restore();
-    });
-
-    it("postAcceptEdit() includes edit_distance and time_since_accept_ms", async () => {
-      const mock = createMockServer([]);
-      const client = newClient();
-
-      const gen = client.generation("sess_1");
-      gen.postAcceptEdit({ edit_distance: 0.6, time_since_accept_ms: 300000 });
-      await client.flush();
-
-      const paeEvent = mock.requests[0].events[1];
-      expect(paeEvent.type).toBe("$post_accept_edit");
-      expect(paeEvent.metadata).toEqual(expect.objectContaining({
-        edit_distance: 0.6,
-        time_since_accept_ms: 300000,
-      }));
+      const customEvent = mock.requests[0].events[1];
+      expect(customEvent.type).toBe("thumbs_down");
+      expect(customEvent.metadata).toEqual(expect.objectContaining({ reason: "wrong_tone" }));
 
       client.destroy();
       mock.restore();
@@ -825,9 +775,9 @@ describe("LitmusClient", () => {
       const client = newClient();
 
       const gen = client.generation("sess_1");
-      gen.view();
-      gen.edit({ edit_distance: 0.1 });
-      gen.accept();
+      gen.event("$view");
+      gen.event("$edit", { edit_distance: 0.1 });
+      gen.event("$accept");
       await client.flush();
 
       const events = mock.requests[0].events;
@@ -848,8 +798,8 @@ describe("LitmusClient", () => {
       const client = newClient();
 
       const gen = client.generation("sess_1", { user_id: "user_42" });
-      gen.accept();
-      gen.share({ channel: "email" });
+      gen.event("$accept");
+      gen.event("$share", { channel: "email" });
       await client.flush();
 
       const events = mock.requests[0].events;
@@ -869,7 +819,7 @@ describe("LitmusClient", () => {
 
       const contentGen = client.feature("content_gen");
       const gen = contentGen.generation("sess_1");
-      gen.accept();
+      gen.event("$accept");
       await client.flush();
 
       const events = mock.requests[0].events;
@@ -891,7 +841,7 @@ describe("LitmusClient", () => {
         user_id: "user_99",
       });
       const gen = topics.generation("sess_1");
-      gen.regenerate();
+      gen.event("$regenerate");
       await client.flush();
 
       const events = mock.requests[0].events;
@@ -912,7 +862,7 @@ describe("LitmusClient", () => {
 
       const feat = client.feature("content_gen", { user_id: "default_user" });
       const gen = feat.generation("sess_1", { user_id: "specific_user" });
-      gen.accept();
+      gen.event("$accept");
       await client.flush();
 
       const events = mock.requests[0].events;
@@ -950,11 +900,11 @@ describe("LitmusClient", () => {
       const topics = client.feature("topics", { model: "claude-sonnet" });
 
       const gen1 = contentGen.generation("sess_1");
-      gen1.accept();
+      gen1.event("$accept");
 
       const gen2 = topics.generation("sess_1");
-      gen2.regenerate();
-      gen2.abandon();
+      gen2.event("$regenerate");
+      gen2.event("$abandon");
 
       await client.flush();
 
@@ -982,7 +932,7 @@ describe("LitmusClient", () => {
       const client = newClient();
 
       const gen = client.attach("backend-gen-uuid", "sess_1");
-      gen.accept();
+      gen.event("$accept");
       await client.flush();
 
       const events = mock.requests[0].events;
@@ -1007,58 +957,131 @@ describe("LitmusClient", () => {
       mock.restore();
     });
 
-    it("carries defaults to all emitted signals", async () => {
+    it("works with no opts at all", async () => {
       const mock = createMockServer([]);
       const client = newClient();
 
-      const gen = client.attach("gen-123", "sess_1", {
-        user_id: "u1",
-        prompt_id: "summarizer",
-        metadata: { source: "backend" },
+      const gen = client.attach("gen-abc", "sess_1");
+      gen.event("$copy");
+      await client.flush();
+
+      const event = mock.requests[0].events[0];
+      expect(event.generation_id).toBe("gen-abc");
+      expect(event.session_id).toBe("sess_1");
+      expect(event.user_id).toBeUndefined();
+
+      client.destroy();
+      mock.restore();
+    });
+  });
+
+  describe("cross-SDK correlation", () => {
+    it("all events share the same generation_id", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      // Backend creates generation (emits $generation with prompt context)
+      const backendGen = client.generation("sess_1", {
+        prompt_id: "content_gen",
+        prompt_version: "v2.3",
+        metadata: { model: "gpt-4o", latency_ms: 420 },
       });
-      gen.accept();
-      gen.edit({ edit_distance: 0.3 });
+      const generationId = backendGen.id;
+
+      // Frontend attaches, records behavioral signals (no $generation)
+      const frontendGen = client.attach(generationId, "sess_1");
+      frontendGen.event("$accept");
+      frontendGen.event("$edit", { edit_distance: 0.3 });
+      frontendGen.event("$copy");
+
       await client.flush();
 
       const events = mock.requests[0].events;
-      expect(events).toHaveLength(2);
+
+      // Every event must share the same generation_id
+      const genIds = new Set(events.map((e: CapturedEvent) => e.generation_id));
+      expect(genIds.size).toBe(1);
+      expect(genIds.has(generationId)).toBe(true);
+    });
+
+    it("$generation carries prompt context, behavioral events don't need to", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const backendGen = client.generation("sess_1", {
+        prompt_id: "summarizer",
+        prompt_version: "v3.1",
+        metadata: { model: "claude-sonnet", token_count: 512 },
+      });
+
+      const frontendGen = client.attach(backendGen.id, "sess_1");
+      frontendGen.event("$accept");
+
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      const genEvent = events.find((e: CapturedEvent) => e.type === "$generation")!;
+      const acceptEvent = events.find((e: CapturedEvent) => e.type === "$accept")!;
+
+      // Backend $generation has full prompt context
+      expect(genEvent.prompt_id).toBe("summarizer");
+      expect(genEvent.metadata).toEqual(expect.objectContaining({
+        model: "claude-sonnet",
+        token_count: 512,
+      }));
+
+      // Frontend behavioral event correlates via generation_id only
+      expect(acceptEvent.prompt_id).toBeUndefined();
+      expect(acceptEvent.generation_id).toBe(backendGen.id);
+
+      client.destroy();
+      mock.restore();
+    });
+
+    it("exactly one $generation event no matter how many attach() calls", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("sess_1", { prompt_id: "chat-v1" });
+
+      // Multiple consumers attach to the same generation
+      const handleA = client.attach(gen.id, "sess_1");
+      const handleB = client.attach(gen.id, "sess_1");
+
+      handleA.event("$view");
+      handleB.event("$copy");
+      handleA.event("$accept");
+
+      await client.flush();
+
+      const events = mock.requests[0].events;
+      const genEvents = events.filter((e: CapturedEvent) => e.type === "$generation");
+      expect(genEvents).toHaveLength(1);
+
+      // All 4 events (1 gen + 3 behavioral) share the same id
+      expect(events).toHaveLength(4);
       for (const e of events) {
-        expect(e.user_id).toBe("u1");
-        expect(e.prompt_id).toBe("summarizer");
-        expect(e.generation_id).toBe("gen-123");
-        expect(e.metadata).toEqual(expect.objectContaining({ source: "backend" }));
+        expect(e.generation_id).toBe(gen.id);
       }
 
       client.destroy();
       mock.restore();
     });
 
-    it("cross-SDK flow: generation() on backend, attach() on frontend", async () => {
+    it("session_id is consistent across generation and attach", async () => {
       const mock = createMockServer([]);
       const client = newClient();
 
-      // Simulate backend creating the generation
-      const backendGen = client.generation("sess_1", { prompt_id: "content_gen" });
-      const generationId = backendGen.id;
-
-      // Simulate frontend attaching (no $generation emitted)
-      const frontendGen = client.attach(generationId, "sess_1");
-      frontendGen.accept();
-      frontendGen.edit({ edit_distance: 0.5 });
+      const gen = client.generation("conversation-42", { prompt_id: "chat" });
+      const frontend = client.attach(gen.id, "conversation-42");
+      frontend.event("$accept");
 
       await client.flush();
 
       const events = mock.requests[0].events;
-      // 1 $generation + 1 $accept + 1 $edit = 3
-      expect(events).toHaveLength(3);
-
-      const genEvents = events.filter((e: CapturedEvent) => e.type === "$generation");
-      expect(genEvents).toHaveLength(1); // only the backend one
-
-      // All events share the same generation_id
-      const genIds = new Set(events.map((e: CapturedEvent) => e.generation_id));
-      expect(genIds.size).toBe(1);
-      expect(genIds.has(generationId)).toBe(true);
+      const sessionIds = new Set(events.map((e: CapturedEvent) => e.session_id));
+      expect(sessionIds.size).toBe(1);
+      expect(sessionIds.has("conversation-42")).toBe(true);
 
       client.destroy();
       mock.restore();

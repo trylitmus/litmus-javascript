@@ -1,7 +1,7 @@
 // System event type literals for type safety.
 // v1: core behavioral signals
 // v2: user-initiated + auto-captured
-type SystemEvent =
+export type SystemEvent =
   | "$generation" | "$regenerate" | "$copy" | "$edit" | "$abandon" | "$accept"
   | "$view" | "$partial_copy" | "$refine" | "$followup" | "$rephrase" | "$undo"
   | "$share" | "$flag" | "$rate" | "$escalate" | "$switch_model" | "$retry_context"
@@ -81,7 +81,14 @@ export class Generation {
     this.defaults = defaults;
   }
 
-  private emit(type: SystemEvent, metadata?: Record<string, unknown>) {
+  /**
+   * Record a behavioral signal against this generation.
+   *
+   *   gen.event("$accept");
+   *   gen.event("$edit", { edit_distance: 0.3 });
+   *   gen.event("my_custom_signal", { whatever: true });
+   */
+  event(type: SystemEvent | (string & {}), metadata?: Record<string, unknown>) {
     this.client.track({
       type,
       session_id: this.sessionId,
@@ -90,38 +97,6 @@ export class Generation {
       prompt_version: this.defaults.prompt_version,
       generation_id: this.id,
       metadata: { ...this.defaults.metadata, ...metadata },
-    });
-  }
-
-  accept(metadata?: Record<string, unknown>) { this.emit("$accept", metadata); }
-  edit(opts?: { edit_distance?: number; metadata?: Record<string, unknown> }) {
-    this.emit("$edit", { edit_distance: opts?.edit_distance, ...opts?.metadata });
-  }
-  regenerate(metadata?: Record<string, unknown>) { this.emit("$regenerate", metadata); }
-  copy(metadata?: Record<string, unknown>) { this.emit("$copy", metadata); }
-  abandon(metadata?: Record<string, unknown>) { this.emit("$abandon", metadata); }
-  view(metadata?: Record<string, unknown>) { this.emit("$view", metadata); }
-  refine(opts?: { refinement_type?: string; metadata?: Record<string, unknown> }) {
-    this.emit("$refine", { refinement_type: opts?.refinement_type, ...opts?.metadata });
-  }
-  followup(metadata?: Record<string, unknown>) { this.emit("$followup", metadata); }
-  rephrase(metadata?: Record<string, unknown>) { this.emit("$rephrase", metadata); }
-  undo(metadata?: Record<string, unknown>) { this.emit("$undo", metadata); }
-  share(opts?: { channel?: string; edited_before_share?: boolean; metadata?: Record<string, unknown> }) {
-    this.emit("$share", { channel: opts?.channel, edited_before_share: opts?.edited_before_share, ...opts?.metadata });
-  }
-  flag(opts?: { reason?: string; metadata?: Record<string, unknown> }) {
-    this.emit("$flag", { reason: opts?.reason, ...opts?.metadata });
-  }
-  rate(value: number, opts?: { scale?: "binary" | "5-star" | "10-point"; metadata?: Record<string, unknown> }) {
-    this.emit("$rate", { value, scale: opts?.scale ?? "binary", ...opts?.metadata });
-  }
-  escalate(metadata?: Record<string, unknown>) { this.emit("$escalate", metadata); }
-  postAcceptEdit(opts?: { edit_distance?: number; time_since_accept_ms?: number; metadata?: Record<string, unknown> }) {
-    this.emit("$post_accept_edit", {
-      edit_distance: opts?.edit_distance,
-      time_since_accept_ms: opts?.time_since_accept_ms,
-      ...opts?.metadata,
     });
   }
 }
@@ -453,19 +428,20 @@ export class LitmusClient {
    * Returns a Generation handle for recording behavioral signals
    * without re-emitting the $generation event.
    *
-   * Typical flow:
-   *   1. Backend (Python) calls litmus.generation(), returns gen.id in the API response
-   *   2. Frontend calls litmus.attach(generationId, sessionId) to get a handle
-   *   3. Frontend records signals: gen.accept(), gen.edit(), etc.
+   * The backend owns prompt_id, prompt_version, model, and other generation
+   * context. The frontend only needs the generation_id and session_id to
+   * record what the user did with the output. Everything joins on
+   * generation_id server-side.
    *
    *   const gen = litmus.attach(response.generation_id, sessionId);
    *   gen.accept();
    */
-  attach(generationId: string, sessionId: string, opts?: Omit<FeatureDefaults, "model">): Generation {
+  attach(generationId: string, sessionId: string, opts?: {
+    user_id?: string;
+    metadata?: Record<string, unknown>;
+  }): Generation {
     return new Generation(this, sessionId, generationId, {
       user_id: opts?.user_id,
-      prompt_id: opts?.prompt_id,
-      prompt_version: opts?.prompt_version,
       metadata: opts?.metadata,
     });
   }

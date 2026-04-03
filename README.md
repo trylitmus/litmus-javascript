@@ -20,8 +20,12 @@ const litmus = new LitmusClient({
 
 // Track a generation and user signals
 const gen = litmus.generation("session-123", { promptId: "content_gen" });
-gen.accept();
-gen.edit({ editDistance: 0.3 });
+gen.event("$accept");
+gen.event("$edit", { edit_distance: 0.3 });
+gen.event("$share", { channel: "slack" });
+
+// Custom events work too
+gen.event("my_custom_signal", { score: 0.9 });
 
 // Flush before teardown
 await litmus.flush();
@@ -35,7 +39,7 @@ A `Feature` scopes defaults so you don't repeat yourself:
 ```typescript
 const summarizer = litmus.feature("summarizer", { model: "gpt-4o" });
 const gen = summarizer.generation("session-123");
-gen.accept(); // prompt_id, model, and feature name are attached automatically
+gen.event("$accept"); // prompt_id, model, and feature name attached automatically
 ```
 
 ## Cross-SDK flow
@@ -45,9 +49,13 @@ When the backend creates the generation and the frontend records signals:
 ```typescript
 // Frontend attaches to a generation_id created by the backend
 const gen = litmus.attach("backend-gen-uuid", "session-123");
-gen.accept();
-gen.edit({ editDistance: 0.4 });
+gen.event("$accept");
+gen.event("$edit", { edit_distance: 0.4 });
 ```
+
+## Event types
+
+All system events (`$accept`, `$edit`, `$copy`, etc.) get full autocomplete via the `SystemEvent` type. Custom event strings are accepted too.
 
 ## How it works
 
