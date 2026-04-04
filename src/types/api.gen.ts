@@ -102,7 +102,15 @@ export type $defs = Record<string, never>;
 export interface operations {
     ingestEvents: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Alternative to the Authorization header for environments where
+                 *     custom headers cannot be set (e.g. navigator.sendBeacon). Pass
+                 *     the full API key as the value. When both this parameter and the
+                 *     Authorization header are present, the header takes precedence.
+                 */
+                token?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
