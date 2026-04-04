@@ -102,7 +102,7 @@ export class ConsentManager {
 
   /** Load consent from localStorage. Returns PENDING if nothing stored. */
   private load(): ConsentStatusValue {
-    if (typeof localStorage === "undefined") return ConsentStatus.PENDING;
+    if (typeof localStorage === "undefined" || typeof localStorage.getItem !== "function") return ConsentStatus.PENDING;
     try {
       const stored = localStorage.getItem(this.storageKey);
       if (stored === "0") return ConsentStatus.DENIED;
@@ -115,7 +115,7 @@ export class ConsentManager {
 
   /** Persist consent choice to localStorage. */
   private persist(value: "0" | "1"): void {
-    if (typeof localStorage === "undefined") return;
+    if (typeof localStorage === "undefined" || typeof localStorage.setItem !== "function") return;
     try {
       localStorage.setItem(this.storageKey, value);
     } catch {

@@ -25,7 +25,11 @@ afterAll(async () => {
 
 beforeEach(() => {
   server.reset();
-  localStorage.clear();
+  // Node 25 ships a global localStorage stub without standard methods.
+  // jsdom should override it, but guard just in case.
+  if (typeof localStorage.clear === "function") {
+    localStorage.clear();
+  }
 });
 
 function makeClient(overrides?: Partial<LitmusConfig>): LitmusClient {

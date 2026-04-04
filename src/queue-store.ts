@@ -35,7 +35,7 @@ export class QueueStore {
 
   /** Write the current buffer to localStorage. Overwrites previous state. */
   save(events: BufferedEvent[]): void {
-    if (typeof localStorage === "undefined") return;
+    if (typeof localStorage === "undefined" || typeof localStorage.setItem !== "function") return;
     try {
       if (events.length === 0) {
         localStorage.removeItem(this.key);
@@ -49,7 +49,7 @@ export class QueueStore {
 
   /** Load persisted events from localStorage. Returns empty array on failure. */
   load(): BufferedEvent[] {
-    if (typeof localStorage === "undefined") return [];
+    if (typeof localStorage === "undefined" || typeof localStorage.getItem !== "function") return [];
     try {
       const stored = localStorage.getItem(this.key);
       if (!stored) return [];
