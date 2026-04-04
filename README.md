@@ -14,7 +14,7 @@ pnpm add @trylitmus/sdk
 import { LitmusClient } from "@trylitmus/sdk";
 
 const litmus = new LitmusClient({
-  endpoint: "https://ingest.trylitmus.com",
+  endpoint: "https://events.trylitmus.app",
   apiKey: "ltm_pk_live_...",
 });
 
