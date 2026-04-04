@@ -83,4 +83,24 @@ export class Generation {
   edit(opts: { before: string; after: string; metadata?: Record<string, unknown> }) {
     this.event("$edit", { ...opts.metadata, before: opts.before, after: opts.after });
   }
+
+  /** User used the output as-is. */
+  accept(metadata?: Record<string, unknown>) {
+    this.event("$accept", metadata);
+  }
+
+  /** User copied the output. */
+  copy(metadata?: Record<string, unknown>) {
+    this.event("$copy", metadata);
+  }
+
+  /** User requested a new output. Fire BEFORE creating the next generation. */
+  regenerate(metadata?: Record<string, unknown>) {
+    this.event("$regenerate", metadata);
+  }
+
+  /** User shared the output. */
+  share(opts?: { channel?: string; metadata?: Record<string, unknown> }) {
+    this.event("$share", { ...opts?.metadata, channel: opts?.channel });
+  }
 }
