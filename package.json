@@ -14,11 +14,15 @@
   "scripts": {
     "build": "tsup",
     "lint": "oxlint src/",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
+    "test:browser": "playwright test",
+    "test:all": "vitest run && playwright test",
     "generate": "openapi-typescript ../../contract/openapi.yaml -o src/types/api.gen.ts"
   },
   "devDependencies": {
     "@litmus/tsconfig": "workspace:*",
+    "@playwright/test": "^1.59.1",
+    "jsdom": "^29.0.1",
     "openapi-typescript": "^7.6.1",
     "tsup": "^8.4.0",
     "typescript": "^5.8.0",
