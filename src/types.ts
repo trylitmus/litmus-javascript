@@ -34,8 +34,8 @@ export interface BufferedEvent extends TrackEvent {
 }
 
 export interface LitmusConfig {
-  /** Base URL of the ingest service */
-  endpoint: string;
+  /** Base URL of the ingest service. Default: https://ingest.trylitmus.app */
+  endpoint?: string;
   /** API key (ltm_pk_live_... or ltm_pk_test_...) */
   apiKey: string;
   /** How often to flush buffered events (ms). Default: 5000 */

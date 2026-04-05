@@ -91,7 +91,7 @@ export class LitmusClient implements GenerationHost {
       disableCompression: config.disableCompression ?? false,
       debug: config.debug ?? false,
       disableQueuePersistence: config.disableQueuePersistence ?? false,
-      endpoint: config.endpoint,
+      endpoint: config.endpoint ?? "https://ingest.trylitmus.app",
       apiKey: config.apiKey,
     };
 
