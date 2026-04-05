@@ -11,21 +11,30 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/trylitmus/litmus-javascript.git"
+  },
+  "homepage": "https://trylitmus.com",
+  "bugs": {
+    "url": "https://github.com/trylitmus/litmus-javascript/issues"
+  },
   "scripts": {
     "build": "tsup",
     "lint": "oxlint src/",
     "test": "vitest run",
     "test:browser": "playwright test",
     "test:all": "vitest run && playwright test",
-    "generate": "openapi-typescript ../../contract/openapi.yaml -o src/types/api.gen.ts"
+    "generate": "openapi-typescript contract/openapi.yaml -o src/types/api.gen.ts"
   },
   "devDependencies": {
-    "@litmus/tsconfig": "workspace:*",
     "@playwright/test": "^1.59.1",
     "jsdom": "^29.0.1",
     "openapi-typescript": "^7.6.1",
+    "oxlint": "^1.56.0",
     "tsup": "^8.4.0",
     "typescript": "^5.8.0",
     "vitest": "^3.1.0"
-  }
+  },
+  "packageManager": "pnpm@10.30.3"
 }

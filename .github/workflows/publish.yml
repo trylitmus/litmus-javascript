@@ -1,0 +1,41 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify version matches tag
+        run: |
+          tag_version="${GITHUB_REF#refs/tags/v}"
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "$pkg_version" != "$tag_version" ]; then
+            echo "::error::Version mismatch: package.json has \$pkg_version but tag is \$tag_version"
+            exit 1
+          fi
+
+      - name: Build
+        run: pnpm build
+
+      - name: Publish to npm
+        run: npm publish --access public

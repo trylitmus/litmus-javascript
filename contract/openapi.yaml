@@ -1,0 +1,177 @@
+openapi: "3.0.3"
+info:
+  title: Litmus Ingest API
+  version: "1.0.0"
+  description: Event ingestion API for Litmus implicit evals.
+
+servers:
+  - url: https://ingest.trylitmus.app
+    description: Production
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/events:
+    post:
+      operationId: ingestEvents
+      summary: Ingest a batch of events
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Alternative to the Authorization header for environments where
+            custom headers cannot be set (e.g. navigator.sendBeacon). Pass
+            the full API key as the value. When both this parameter and the
+            Authorization header are present, the header takes precedence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestRequest"
+      responses:
+        "202":
+          description: Events accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Insufficient scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Litmus API key (ltm_pk_live_... or ltm_sk_live_...).
+
+        The key can also be passed as a ?token= query parameter on any
+        authenticated endpoint. This exists to support navigator.sendBeacon(),
+        which cannot set custom headers. When both the header and query
+        parameter are present, the Authorization header takes precedence.
+
+  schemas:
+    EventType:
+      type: string
+      maxLength: 64
+      pattern: "^(\\$[a-z][a-z0-9_:]*|[a-z][a-z0-9_:]*)$"
+      description: |
+        Event type identifier. Lowercase a-z, 0-9, underscore, colon only.
+        System events use a $ prefix (reserved namespace).
+        Known system events: $generation, $regenerate, $copy, $edit, $abandon, $accept,
+        $view, $partial_copy, $refine, $followup, $rephrase, $undo, $share, $flag,
+        $rate, $escalate, $switch_model, $retry_context, $post_accept_edit,
+        $blur, $return, $scroll_regression, $navigate, $interrupt.
+
+    Event:
+      type: object
+      required:
+        - id
+        - session_id
+        - type
+      properties:
+        id:
+          type: string
+          description: Unique event ID (UUID)
+        project_id:
+          type: string
+          description: Injected by the server from the authenticated token
+        session_id:
+          type: string
+          description: User session identifier
+        type:
+          $ref: "#/components/schemas/EventType"
+        prompt_id:
+          type: string
+          description: Identifier for the prompt template
+        prompt_version:
+          type: string
+          description: Version of the prompt template (set explicitly or auto-hashed)
+        generation_id:
+          type: string
+          description: Identifier for the specific generation
+        user_id:
+          type: string
+          description: Identifier for the end user. Required for cross-session signals (Tier 4+).
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Arbitrary key-value metadata
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp. Server defaults to now if omitted.
+
+    IngestRequest:
+      type: object
+      required:
+        - events
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+          minItems: 1
+          maxItems: 1000
+
+    IngestResponse:
+      type: object
+      required:
+        - accepted
+      properties:
+        accepted:
+          type: integer
+          description: Number of events accepted
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
