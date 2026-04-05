@@ -77,6 +77,8 @@ export class LitmusClient implements GenerationHost {
   private consent: ConsentManager;
   private rateLimiter: RateLimiter;
   private queueStore: QueueStore;
+  /** Last session_id seen via generation() or attach(). Used for $pageleave. */
+  private lastSessionId: string | null = null;
 
   constructor(config: LitmusConfig) {
     this.config = {
@@ -197,7 +199,10 @@ export class LitmusClient implements GenerationHost {
     // $pageleave is clearer than $abandon with reason "page_unload".
     // It means "the user left the page" without implying they ignored
     // the output. An abandon is a judgment, a pageleave is a fact.
-    this.track({ type: "$pageleave", session_id: "" });
+    // Only fire if we have a session context (at least one generation was created/attached).
+    if (this.lastSessionId) {
+      this.track({ type: "$pageleave", session_id: this.lastSessionId });
+    }
 
     // Auto-abandon all unresolved generations.
     this.abandonDetector.abandonAll({ reason: "page_unload" });
@@ -350,6 +355,7 @@ export class LitmusClient implements GenerationHost {
     });
 
     const gen = new Generation(this, sessionId, generationId, defaults);
+    this.lastSessionId = sessionId;
 
     if (!this.config.disableAutoAbandon) {
       this.abandonDetector.register(generationId, (metadata) => {
@@ -374,6 +380,7 @@ export class LitmusClient implements GenerationHost {
       user_id: opts?.user_id,
       metadata: opts?.metadata,
     });
+    this.lastSessionId = sessionId;
 
     if (!this.config.disableAutoAbandon) {
       this.abandonDetector.register(generationId, (metadata) => {
