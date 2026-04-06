@@ -19,18 +19,22 @@
 // into it for track() and _resolveGeneration() without a circular import.
 // ---------------------------------------------------------------------------
 
-import type {
-  TrackEvent, BufferedEvent, LitmusConfig, ResolvedConfig,
-  FeatureDefaults, GenerationHost,
-} from "./types.js";
-import { sendFetch, sendBeacon } from "./transport.js";
-import { Generation } from "./generation.js";
-import { Feature } from "./feature.js";
 import { AbandonDetector, DEFAULT_ABANDON_THRESHOLD_MS } from "./abandon.js";
 import { ConsentManager } from "./consent.js";
-import { RateLimiter } from "./rate-limiter.js";
-import { QueueStore } from "./queue-store.js";
+import { Feature } from "./feature.js";
+import { Generation } from "./generation.js";
 import { createLogger, type Logger } from "./logger.js";
+import { QueueStore } from "./queue-store.js";
+import { RateLimiter } from "./rate-limiter.js";
+import { sendBeacon, sendFetch } from "./transport.js";
+import type {
+  BufferedEvent,
+  FeatureDefaults,
+  GenerationHost,
+  LitmusConfig,
+  ResolvedConfig,
+  TrackEvent,
+} from "./types.js";
 import { SDK_NAME, SDK_VERSION } from "./version.js";
 
 // ---------------------------------------------------------------------------
@@ -124,6 +128,13 @@ export class LitmusClient implements GenerationHost {
       }
     }
 
+    if (this.consent.isOptedOut()) {
+      this.log.debug(
+        "tracking is disabled — user opted out or browser Do Not Track is enabled. All events will be" +
+          " silently dropped.",
+      );
+    }
+
     this.log.debug("initialized", { endpoint: this.config.endpoint, version: SDK_VERSION });
   }
 
@@ -142,7 +153,11 @@ export class LitmusClient implements GenerationHost {
     // All lifecycle handlers are wrapped in try/catch. A throw here is
     // invisible to the caller and silently kills the SDK.
     this.boundPageHide = () => {
-      try { this.handleUnload(); } catch (e) { this.log.error("unload handler failed", e); }
+      try {
+        this.handleUnload();
+      } catch (e) {
+        this.log.error("unload handler failed", e);
+      }
     };
     window.addEventListener(unloadEvent, this.boundPageHide, { passive: false } as AddEventListenerOptions);
 
@@ -153,7 +168,9 @@ export class LitmusClient implements GenerationHost {
           // Persist queue when tab goes hidden — it might get killed while backgrounded.
           this.persistQueue();
         }
-      } catch (e) { this.log.error("visibilitychange handler failed", e); }
+      } catch (e) {
+        this.log.error("visibilitychange handler failed", e);
+      }
     };
     document.addEventListener("visibilitychange", this.boundVisibilityChange);
 
@@ -161,7 +178,9 @@ export class LitmusClient implements GenerationHost {
       try {
         this.online = true;
         this.flush();
-      } catch (e) { this.log.error("online handler failed", e); }
+      } catch (e) {
+        this.log.error("online handler failed", e);
+      }
     };
     this.boundOffline = () => {
       this.online = false;
@@ -250,9 +269,9 @@ export class LitmusClient implements GenerationHost {
   private scheduleBackoffRetry(delayOverride?: number) {
     this.clearInterval();
     this.clearBackoffTimer();
-    const delay = delayOverride ??
-      Math.min(BASE_DELAY_MS * Math.pow(2, this.consecutiveFailures - 1), MAX_DELAY_MS) +
-      Math.floor(Math.random() * 1000);
+    const delay =
+      delayOverride ??
+      Math.min(BASE_DELAY_MS * 2 ** (this.consecutiveFailures - 1), MAX_DELAY_MS) + Math.floor(Math.random() * 1000);
 
     this.backoffTimer = setTimeout(async () => {
       this.backoffTimer = null;
@@ -268,13 +287,19 @@ export class LitmusClient implements GenerationHost {
   // -----------------------------------------------------------------------
 
   /** Disable tracking. Persists to localStorage. */
-  optOut(): void { this.consent.optOut(); }
+  optOut(): void {
+    this.consent.optOut();
+  }
 
   /** Enable tracking. Persists to localStorage. */
-  optIn(): void { this.consent.optIn(); }
+  optIn(): void {
+    this.consent.optIn();
+  }
 
   /** Returns true if the user has opted out of tracking. */
-  hasOptedOut(): boolean { return this.consent.isOptedOut(); }
+  hasOptedOut(): boolean {
+    return this.consent.isOptedOut();
+  }
 
   // -----------------------------------------------------------------------
   // Public API
@@ -331,10 +356,13 @@ export class LitmusClient implements GenerationHost {
    * token_count, and other response metadata. The $generation event is
    * a record of what was produced, not a request to produce it.
    */
-  generation(sessionId: string, opts?: FeatureDefaults & {
-    prompt_version?: string;
-    metadata?: Record<string, unknown>;
-  }): Generation {
+  generation(
+    sessionId: string,
+    opts?: FeatureDefaults & {
+      prompt_version?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Generation {
     const generationId = crypto.randomUUID();
     const defaults: FeatureDefaults = {
       user_id: opts?.user_id,
@@ -372,10 +400,14 @@ export class LitmusClient implements GenerationHost {
    * Returns a Generation handle for recording behavioral signals
    * without re-emitting the $generation event.
    */
-  attach(generationId: string, sessionId: string, opts?: {
-    user_id?: string;
-    metadata?: Record<string, unknown>;
-  }): Generation {
+  attach(
+    generationId: string,
+    sessionId: string,
+    opts?: {
+      user_id?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Generation {
     const gen = new Generation(this, sessionId, generationId, {
       user_id: opts?.user_id,
       metadata: opts?.metadata,

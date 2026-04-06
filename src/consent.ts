@@ -29,7 +29,7 @@ export const ConsentStatus = {
   GRANTED: 1,
 } as const;
 
-export type ConsentStatusValue = typeof ConsentStatus[keyof typeof ConsentStatus];
+export type ConsentStatusValue = (typeof ConsentStatus)[keyof typeof ConsentStatus];
 
 export class ConsentManager {
   private status: ConsentStatusValue;
@@ -84,7 +84,11 @@ export class ConsentManager {
   reset(): void {
     this.status = ConsentStatus.PENDING;
     if (typeof localStorage !== "undefined") {
-      try { localStorage.removeItem(this.storageKey); } catch { /* noop */ }
+      try {
+        localStorage.removeItem(this.storageKey);
+      } catch {
+        /* noop */
+      }
     }
   }
 
@@ -94,9 +98,10 @@ export class ConsentManager {
     // navigator.doNotTrack: standard (Chrome, Firefox)
     // navigator.msDoNotTrack: legacy IE
     // window.doNotTrack: legacy Safari
-    const dnt = navigator.doNotTrack
-      ?? (navigator as Record<string, unknown>)["msDoNotTrack"]
-      ?? (typeof window !== "undefined" ? (window as Record<string, unknown>)["doNotTrack"] : undefined);
+    const dnt =
+      navigator.doNotTrack ??
+      (navigator as Record<string, unknown>).msDoNotTrack ??
+      (typeof window !== "undefined" ? (window as Record<string, unknown>).doNotTrack : undefined);
     return dnt === "1" || dnt === "yes" || dnt === true;
   }
 

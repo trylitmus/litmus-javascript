@@ -10,11 +10,31 @@
 // v1: core behavioral signals
 // v2: user-initiated + auto-captured
 export type SystemEvent =
-  | "$generation" | "$regenerate" | "$copy" | "$edit" | "$abandon" | "$accept"
-  | "$view" | "$partial_copy" | "$refine" | "$followup" | "$rephrase" | "$undo"
-  | "$share" | "$flag" | "$rate" | "$escalate" | "$switch_model" | "$retry_context"
-  | "$post_accept_edit" | "$pageleave"
-  | "$blur" | "$return" | "$scroll_regression" | "$navigate" | "$interrupt";
+  | "$generation"
+  | "$regenerate"
+  | "$copy"
+  | "$edit"
+  | "$abandon"
+  | "$accept"
+  | "$view"
+  | "$partial_copy"
+  | "$refine"
+  | "$followup"
+  | "$rephrase"
+  | "$undo"
+  | "$share"
+  | "$flag"
+  | "$rate"
+  | "$escalate"
+  | "$switch_model"
+  | "$retry_context"
+  | "$post_accept_edit"
+  | "$pageleave"
+  | "$blur"
+  | "$return"
+  | "$scroll_regression"
+  | "$navigate"
+  | "$interrupt";
 
 /** What the user passes to `track()`. */
 export interface TrackEvent {

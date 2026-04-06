@@ -25,10 +25,13 @@
 
 // Raw DOM events that indicate a human is at the keyboard/mouse/screen.
 const ACTIVITY_EVENTS = [
-  "mousemove", "mousedown", "click",
+  "mousemove",
+  "mousedown",
+  "click",
   "keydown",
   "scroll",
-  "touchstart", "touchmove",
+  "touchstart",
+  "touchmove",
   "resize",
 ] as const;
 
@@ -108,7 +111,11 @@ export class AbandonDetector {
 
     // Wrap in try/catch — a throw here would kill the interval silently.
     this.idleCheckTimer = setInterval(() => {
-      try { this.checkForAbandoned(); } catch (e) { console.error("[litmus] idle check failed", e); }
+      try {
+        this.checkForAbandoned();
+      } catch (e) {
+        console.error("[litmus] idle check failed", e);
+      }
     }, this.checkInterval);
   }
 

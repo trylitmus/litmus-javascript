@@ -60,7 +60,9 @@ export function createTestServer(): TestServer {
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     let body = "";
-    req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+    req.on("data", (chunk: Buffer) => {
+      body += chunk.toString();
+    });
     req.on("end", () => {
       try {
         const parsed = JSON.parse(body);
@@ -82,12 +84,22 @@ export function createTestServer(): TestServer {
   let endpoint = "";
 
   return {
-    get batches() { return batches; },
-    get allEvents() { return batches.flatMap(b => b.events); },
-    get endpoint() { return endpoint; },
+    get batches() {
+      return batches;
+    },
+    get allEvents() {
+      return batches.flatMap((b) => b.events);
+    },
+    get endpoint() {
+      return endpoint;
+    },
 
-    setStatus(code: number) { statusCode = code; },
-    setHeaders(headers: Record<string, string>) { responseHeaders = headers; },
+    setStatus(code: number) {
+      statusCode = code;
+    },
+    setHeaders(headers: Record<string, string>) {
+      responseHeaders = headers;
+    },
 
     async start(): Promise<string> {
       return new Promise((resolve) => {
@@ -101,7 +113,7 @@ export function createTestServer(): TestServer {
 
     async stop(): Promise<void> {
       return new Promise((resolve, reject) => {
-        server.close((err) => err ? reject(err) : resolve());
+        server.close((err) => (err ? reject(err) : resolve()));
       });
     },
 

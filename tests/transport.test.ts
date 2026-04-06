@@ -5,7 +5,7 @@
 // splits batches, and eventually gives up — all against a real server.
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { LitmusClient, type LitmusConfig } from "../src/index.js";
 import { createTestServer, type TestServer } from "./helpers.js";
 
@@ -117,16 +117,10 @@ describe("client errors", () => {
 describe("413 batch splitting", () => {
   it("splits a batch in half and retries", async () => {
     // Return 413 on the first request, 200 on all subsequent.
-    let requestCount = 0;
-    const origSetStatus = server.setStatus.bind(server);
-
-    // Hack: swap status dynamically based on request count.
     // We need to track requests manually since helpers.ts doesn't support per-request status.
     // Instead, we'll use a server that returns 413 once then 200.
     const splitServer = createTestServer();
     const splitEndpoint = await splitServer.start();
-
-    let firstRequest = true;
     // We can't easily change status per-request with the current helper,
     // so let's test the observable behavior: events eventually arrive.
 
@@ -153,14 +147,14 @@ describe("413 batch splitting", () => {
     splitServer.setStatus(200);
 
     // Give the setTimeout(0) retry a chance to fire.
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 50));
     // Flush again to catch any remaining halves.
     await client.flush();
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 50));
     await client.flush();
 
     // All 4 events should eventually arrive (possibly across multiple batches).
-    const allTypes = splitServer.allEvents.map(e => e.type).sort();
+    const allTypes = splitServer.allEvents.map((e) => e.type).sort();
     expect(allTypes).toContain("evt_0");
     expect(allTypes).toContain("evt_3");
 
@@ -203,7 +197,7 @@ describe("429 rate limiting", () => {
     await vi.advanceTimersByTimeAsync(2500);
 
     // The retry should have fired and succeeded.
-    const events = retryServer.allEvents.filter(e => e.type === "throttled");
+    const events = retryServer.allEvents.filter((e) => e.type === "throttled");
     expect(events.length).toBeGreaterThanOrEqual(1);
 
     await client.destroy();
@@ -241,7 +235,7 @@ describe("5xx server errors", () => {
     // Advance past the first backoff delay (BASE_DELAY_MS=1000 + up to 1000 jitter).
     await vi.advanceTimersByTimeAsync(2500);
 
-    const events = errorServer.allEvents.filter(e => e.type === "will_retry");
+    const events = errorServer.allEvents.filter((e) => e.type === "will_retry");
     expect(events.length).toBeGreaterThanOrEqual(1);
 
     await client.destroy();

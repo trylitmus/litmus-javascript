@@ -10,8 +10,8 @@
 //   gen.event("$accept");
 // ---------------------------------------------------------------------------
 
-import type { TrackEvent, FeatureDefaults } from "./types.js";
 import type { Generation } from "./generation.js";
+import type { FeatureDefaults, TrackEvent } from "./types.js";
 
 /**
  * Interface for the client methods that Feature needs.
@@ -19,10 +19,13 @@ import type { Generation } from "./generation.js";
  */
 export interface FeatureHost {
   track(event: TrackEvent): void;
-  generation(sessionId: string, opts?: FeatureDefaults & {
-    prompt_version?: string;
-    metadata?: Record<string, unknown>;
-  }): Generation;
+  generation(
+    sessionId: string,
+    opts?: FeatureDefaults & {
+      prompt_version?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Generation;
 }
 
 export class Feature {
@@ -37,11 +40,14 @@ export class Feature {
     this.defaults = { ...defaults, prompt_id: defaults.prompt_id ?? name };
   }
 
-  generation(sessionId: string, opts?: {
-    user_id?: string;
-    prompt_version?: string;
-    metadata?: Record<string, unknown>;
-  }): Generation {
+  generation(
+    sessionId: string,
+    opts?: {
+      user_id?: string;
+      prompt_version?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Generation {
     const baseMetadata: Record<string, unknown> = { feature: this.name };
     if (this.defaults.model) baseMetadata.model = this.defaults.model;
     const merged: FeatureDefaults = {

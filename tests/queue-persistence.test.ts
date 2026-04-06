@@ -7,8 +7,8 @@
 // @vitest-environment jsdom
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { LitmusClient, type LitmusConfig } from "../src/index.js";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { LitmusClient, type LitmusConfig } from "../src";
 import { QueueStore } from "../src/queue-store.js";
 import { createTestServer, type TestServer } from "./helpers.js";
 
@@ -114,7 +114,7 @@ describe("queue persistence", () => {
     await client2.flush();
 
     // The "survived" event plus $generation/$abandon from destroy should appear.
-    const survived = server.allEvents.filter(e => e.type === "survived");
+    const survived = server.allEvents.filter((e) => e.type === "survived");
     expect(survived.length).toBeGreaterThanOrEqual(1);
 
     await client2.destroy();

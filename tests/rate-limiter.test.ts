@@ -5,7 +5,7 @@
 // Real HTTP server, real timers.
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LitmusClient, type LitmusConfig } from "../src/index.js";
 import { RateLimiter } from "../src/rate-limiter.js";
 import { createTestServer, type TestServer } from "./helpers.js";
@@ -22,7 +22,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await new Promise(r => setTimeout(r, 20));
+  await new Promise((r) => setTimeout(r, 20));
   server.reset();
 });
 
@@ -67,7 +67,7 @@ describe("RateLimiter", () => {
     expect(limiter.isRateLimited()).toBe(true);
 
     // Wait 200ms → should refill ~20 tokens (100/sec * 0.2s), capped at 10
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 200));
 
     // Should be allowed again
     expect(limiter.isRateLimited()).toBe(false);
@@ -75,7 +75,7 @@ describe("RateLimiter", () => {
 
   it("never exceeds burst limit on refill", async () => {
     const limiter = new RateLimiter(1000, 5); // high rate, low burst
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 100));
 
     // Consume all. Even with high refill rate, bucket is capped at 5.
     // A token or two may have refilled during the 100ms sleep, so allow
@@ -124,7 +124,7 @@ describe("client-side rate limiting", () => {
     client.track({ type: "$abandon", session_id: "sess_1", metadata: { auto: true } });
     await client.flush();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon");
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
     expect(abandons).toHaveLength(1);
 
     await client.destroy();
@@ -140,7 +140,7 @@ describe("client-side rate limiting", () => {
     client.track({ type: "$pageleave", session_id: "sess_1" });
     await client.flush();
 
-    const leaves = server.allEvents.filter(e => e.type === "$pageleave");
+    const leaves = server.allEvents.filter((e) => e.type === "$pageleave");
     expect(leaves).toHaveLength(1);
 
     await client.destroy();
@@ -157,13 +157,13 @@ describe("client-side rate limiting", () => {
     server.reset();
 
     // Wait for tokens to refill (100ms at 10/sec = ~1 token)
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 200));
 
     // Should be able to track again
     client.track({ type: "recovered", session_id: "sess_1" });
     await client.flush();
 
-    const recovered = server.allEvents.filter(e => e.type === "recovered");
+    const recovered = server.allEvents.filter((e) => e.type === "recovered");
     expect(recovered).toHaveLength(1);
 
     await client.destroy();

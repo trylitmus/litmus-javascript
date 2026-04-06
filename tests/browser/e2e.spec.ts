@@ -9,10 +9,10 @@
 // Prerequisites: pnpm run build (SDK must be compiled to dist/)
 // ---------------------------------------------------------------------------
 
-import { test, expect } from "@playwright/test";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
+import { expect, test } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
 // Test server: serves both the SDK bundle and the API endpoint.
@@ -61,7 +61,7 @@ const TEST_PAGE = `<!DOCTYPE html>
 
 test.beforeAll(async () => {
   server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url!, `http://localhost`);
+    const url = new URL(req.url ?? "/", `http://localhost`);
 
     // Serve the test page at /.
     if (url.pathname === "/") {
@@ -88,7 +88,9 @@ test.beforeAll(async () => {
     // Capture event batches at /v1/events.
     if (url.pathname === "/v1/events") {
       let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      req.on("data", (chunk: Buffer) => {
+        body += chunk.toString();
+      });
       req.on("end", () => {
         try {
           const parsed = JSON.parse(body);
@@ -129,7 +131,7 @@ test.beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 function allEvents(): CapturedEvent[] {
-  return batches.flatMap(b => b.events);
+  return batches.flatMap((b) => b.events);
 }
 
 // ---------------------------------------------------------------------------
@@ -144,9 +146,14 @@ test("SDK loads and sends events from a real browser", async ({ page }) => {
 
   // Create a client and generation, track an event, flush.
   await page.evaluate(async (endpoint: string) => {
-    const Client = (window as unknown as Record<string, unknown>).__LitmusClient as typeof import("../../src/index.js").LitmusClient;
+    const Client = (window as unknown as Record<string, unknown>)
+      .__LitmusClient as typeof import("../../src/index.js").LitmusClient;
 
-    const litmus = new (Client as unknown as new (cfg: Record<string, unknown>) => InstanceType<typeof import("../../src/index.js").LitmusClient>)({
+    const litmus = new (
+      Client as unknown as new (
+        cfg: Record<string, unknown>,
+      ) => InstanceType<typeof import("../../src/index.js").LitmusClient>
+    )({
       endpoint,
       apiKey: "ltm_pk_test_browser",
       flushInterval: 999_999,
@@ -170,13 +177,13 @@ test("SDK loads and sends events from a real browser", async ({ page }) => {
   const events = allEvents();
   expect(events.length).toBeGreaterThanOrEqual(3); // $generation + $accept + $edit
 
-  const types = events.map(e => e.type);
+  const types = events.map((e) => e.type);
   expect(types).toContain("$generation");
   expect(types).toContain("$accept");
   expect(types).toContain("$edit");
 
   // Verify $edit has before/after.
-  const editEvent = events.find(e => e.type === "$edit");
+  const editEvent = events.find((e) => e.type === "$edit");
   expect(editEvent?.metadata).toMatchObject({
     before: "Hello world",
     after: "Hello, world!",
@@ -189,7 +196,9 @@ test("sendBeacon fires on page navigation", async ({ page }) => {
 
   // Create a client with events in the buffer but DON'T flush.
   await page.evaluate((endpoint: string) => {
-    const Client = (window as unknown as Record<string, unknown>).__LitmusClient as new (cfg: Record<string, unknown>) => Record<string, unknown>;
+    const Client = (window as unknown as Record<string, unknown>).__LitmusClient as new (
+      cfg: Record<string, unknown>,
+    ) => Record<string, unknown>;
 
     const litmus = new Client({
       endpoint,
@@ -198,7 +207,7 @@ test("sendBeacon fires on page navigation", async ({ page }) => {
       disableAutoAbandon: true,
     });
 
-    (litmus as Record<string, Function>).generation("beacon_sess_1", {
+    (litmus as Record<string, (...args: never[]) => unknown>).generation("beacon_sess_1", {
       prompt_id: "beacon_test",
     });
 
@@ -214,7 +223,7 @@ test("sendBeacon fires on page navigation", async ({ page }) => {
 
   // The $generation event should have been sent via sendBeacon.
   const events = allEvents();
-  const beaconEvents = events.filter(e => e.session_id === "beacon_sess_1");
+  const beaconEvents = events.filter((e) => e.session_id === "beacon_sess_1");
   expect(beaconEvents.length).toBeGreaterThanOrEqual(1);
   expect(beaconEvents[0].type).toBe("$generation");
 });
@@ -225,7 +234,9 @@ test("auto-abandon fires in real browser after inactivity", async ({ page }) => 
 
   // Create a client with a very short abandon threshold (2 seconds for fast test).
   await page.evaluate((endpoint: string) => {
-    const Client = (window as unknown as Record<string, unknown>).__LitmusClient as new (cfg: Record<string, unknown>) => Record<string, unknown>;
+    const Client = (window as unknown as Record<string, unknown>).__LitmusClient as new (
+      cfg: Record<string, unknown>,
+    ) => Record<string, unknown>;
 
     const litmus = new Client({
       endpoint,
@@ -235,7 +246,7 @@ test("auto-abandon fires in real browser after inactivity", async ({ page }) => 
       abandonThreshold: 2000, // 2 seconds
     });
 
-    (litmus as Record<string, Function>).generation("abandon_sess_1", {
+    (litmus as Record<string, (...args: never[]) => unknown>).generation("abandon_sess_1", {
       prompt_id: "abandon_test",
     });
 
@@ -248,14 +259,17 @@ test("auto-abandon fires in real browser after inactivity", async ({ page }) => 
 
   // Manually flush to send the $abandon event.
   await page.evaluate(async () => {
-    const litmus = (window as unknown as Record<string, unknown>).__litmus as Record<string, Function>;
+    const litmus = (window as unknown as Record<string, unknown>).__litmus as Record<
+      string,
+      (...args: never[]) => unknown
+    >;
     await litmus.flush();
   });
 
   await page.waitForTimeout(500);
 
   const events = allEvents();
-  const abandons = events.filter(e => e.type === "$abandon" && e.session_id === "abandon_sess_1");
+  const abandons = events.filter((e) => e.type === "$abandon" && e.session_id === "abandon_sess_1");
   expect(abandons.length).toBeGreaterThanOrEqual(1);
   expect(abandons[0].metadata).toMatchObject({ auto: true });
 });

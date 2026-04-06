@@ -5,7 +5,7 @@
 // Tests the full path: SDK call → buffer → flush → HTTP → server capture.
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LitmusClient, type LitmusConfig } from "../src/index.js";
 import { createTestServer, type TestServer } from "./helpers.js";
 
@@ -264,7 +264,7 @@ describe("feature()", () => {
   it("uses feature name as default prompt_id", async () => {
     const client = makeClient();
     const feat = client.feature("email_drafter");
-    const gen = feat.generation("sess_1");
+    feat.generation("sess_1");
 
     await client.flush();
 
@@ -308,7 +308,7 @@ describe("buffering", () => {
 
     expect(server.allEvents).toHaveLength(3);
     // Oldest (event_0, event_1) should be gone.
-    expect(server.allEvents.map(e => e.type)).toEqual(["event_2", "event_3", "event_4"]);
+    expect(server.allEvents.map((e) => e.type)).toEqual(["event_2", "event_3", "event_4"]);
 
     await client.destroy();
   });
@@ -340,7 +340,7 @@ describe("buffering", () => {
     client.track({ type: "b", session_id: "sess_1" });
     await client.flush();
 
-    const ids = server.allEvents.map(e => e.id);
+    const ids = server.allEvents.map((e) => e.id);
     expect(ids[0]).not.toBe(ids[1]);
 
     await client.destroy();
@@ -354,7 +354,7 @@ describe("buffering", () => {
     const afterTrack = new Date().toISOString();
 
     // Wait a bit then flush.
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 50));
     await client.flush();
 
     const ts = server.allEvents[0].timestamp;

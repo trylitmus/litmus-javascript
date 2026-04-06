@@ -19,7 +19,7 @@
 //
 // ---------------------------------------------------------------------------
 
-import type { SystemEvent, FeatureDefaults, GenerationHost } from "./types.js";
+import type { FeatureDefaults, GenerationHost, SystemEvent } from "./types.js";
 
 export class Generation {
   readonly id: string;

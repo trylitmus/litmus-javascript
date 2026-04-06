@@ -56,7 +56,10 @@ export interface SendResult {
   retryAfter?: number;
 }
 
-export function buildPayload(events: BufferedEvent[], apiKey: string): { url_suffix: string; body: string; headers: Record<string, string> } {
+export function buildPayload(
+  events: BufferedEvent[],
+  apiKey: string,
+): { url_suffix: string; body: string; headers: Record<string, string> } {
   const body = JSON.stringify({ events });
   const headers: Record<string, string> = {
     "Content-Type": "application/json",

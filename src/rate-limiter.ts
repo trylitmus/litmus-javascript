@@ -53,8 +53,10 @@ export class RateLimiter {
       // Log once per burst of rate limiting, not on every dropped event.
       if (!this.warned) {
         this.warned = true;
-        console.warn("[litmus] client rate limit reached, events are being dropped. " +
-          "This usually means track() is being called in a tight loop (e.g. render cycle).");
+        console.warn(
+          "[litmus] client rate limit reached, events are being dropped. " +
+            "This usually means track() is being called in a tight loop (e.g. render cycle).",
+        );
       }
       return true;
     }

@@ -22,17 +22,19 @@
   },
   "scripts": {
     "build": "tsup",
-    "lint": "oxlint src/",
+    "check": "biome check .",
+    "format": "biome check --write .",
+    "lint": "biome lint .",
     "test": "vitest run",
     "test:browser": "playwright test",
     "test:all": "vitest run && playwright test",
     "generate": "openapi-typescript contract/openapi.yaml -o src/types/api.gen.ts"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.10",
     "@playwright/test": "^1.59.1",
     "jsdom": "^29.0.1",
     "openapi-typescript": "^7.6.1",
-    "oxlint": "^1.56.0",
     "tsup": "^8.4.0",
     "typescript": "^5.8.0",
     "vitest": "^3.1.0"

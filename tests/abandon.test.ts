@@ -14,7 +14,7 @@
 // @vitest-environment jsdom
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LitmusClient, type LitmusConfig } from "../src";
 import { createTestServer, type TestServer } from "./helpers.js";
 
@@ -56,7 +56,7 @@ function makeClient(overrides?: Partial<LitmusConfig>): LitmusClient {
 /** Wait long enough for the idle check to fire after the threshold. */
 function waitForAbandon(): Promise<void> {
   // threshold + check interval + buffer
-  return new Promise(r => setTimeout(r, THRESHOLD + CHECK_INTERVAL * 2 + 100));
+  return new Promise((r) => setTimeout(r, THRESHOLD + CHECK_INTERVAL * 2 + 100));
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ describe("auto-abandon", () => {
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon");
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
     expect(abandons).toHaveLength(1);
     expect(abandons[0].generation_id).toBe(gen.id);
     expect(abandons[0].metadata).toMatchObject({ auto: true });
@@ -91,7 +91,7 @@ describe("auto-abandon", () => {
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon");
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
     expect(abandons).toHaveLength(0);
 
     await client.destroy();
@@ -107,7 +107,7 @@ describe("auto-abandon", () => {
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon");
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
     expect(abandons).toHaveLength(1);
     expect(abandons[0].generation_id).toBe(gen.id);
 
@@ -123,7 +123,7 @@ describe("auto-abandon", () => {
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon");
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
     expect(abandons).toHaveLength(0);
 
     await client.destroy();
@@ -149,7 +149,7 @@ describe("activity detection", () => {
     clearInterval(keepAlive);
     await client.flush();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon");
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
     expect(abandons).toHaveLength(0);
 
     await client.destroy();
@@ -169,7 +169,7 @@ describe("activity detection", () => {
 
     // Filter by this test's generation to avoid cross-test pollution from
     // fire-and-forget fetches in destroy().
-    const abandons = server.allEvents.filter(e => e.type === "$abandon" && e.generation_id === gen.id);
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon" && e.generation_id === gen.id);
     expect(abandons).toHaveLength(0);
 
     await client.destroy();
@@ -187,7 +187,7 @@ describe("activity detection", () => {
     clearInterval(keepAlive);
     await client.flush();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon" && e.generation_id === gen.id);
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon" && e.generation_id === gen.id);
     expect(abandons).toHaveLength(0);
 
     await client.destroy();
@@ -202,14 +202,14 @@ describe("activity detection", () => {
       window.dispatchEvent(new Event("mousemove"));
     }, THRESHOLD / 3);
 
-    await new Promise(r => setTimeout(r, THRESHOLD + 50));
+    await new Promise((r) => setTimeout(r, THRESHOLD + 50));
     clearInterval(keepAlive);
 
     // Now go idle — abandon should fire.
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon" && e.generation_id === gen.id);
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon" && e.generation_id === gen.id);
     expect(abandons).toHaveLength(1);
 
     await client.destroy();
@@ -233,10 +233,10 @@ describe("multiple open generations", () => {
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon");
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
     expect(abandons).toHaveLength(2);
 
-    const abandonedIds = abandons.map(e => e.generation_id);
+    const abandonedIds = abandons.map((e) => e.generation_id);
     expect(abandonedIds).toContain(gen1.id);
     expect(abandonedIds).toContain(gen3.id);
     expect(abandonedIds).not.toContain(gen2.id);
@@ -261,7 +261,7 @@ describe("destroy()", () => {
     // destroy() is async — await it for proper synchronization.
     await client.destroy();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon");
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
     expect(abandons).toHaveLength(1);
     expect(abandons[0].generation_id).toBe(gen.id);
     expect(abandons[0].metadata).toMatchObject({ auto: true, reason: "destroy" });
@@ -280,7 +280,7 @@ describe("disableAutoAbandon", () => {
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter(e => e.type === "$abandon" && e.generation_id === gen.id);
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon" && e.generation_id === gen.id);
     expect(abandons).toHaveLength(0);
 
     await client.destroy();
