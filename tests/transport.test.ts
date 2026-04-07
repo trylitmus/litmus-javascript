@@ -32,6 +32,7 @@ function makeClient(overrides?: Partial<LitmusConfig>): LitmusClient {
     disablePageLifecycle: true,
     disableAutoAbandon: true,
     disableCompression: true,
+    disableTelemetry: true,
     ...overrides,
   });
 }
@@ -134,6 +135,7 @@ describe("413 batch splitting", () => {
       flushInterval: 999_999,
       disablePageLifecycle: true,
       disableAutoAbandon: true,
+      disableTelemetry: true,
     });
 
     // Track 4 events.
@@ -184,6 +186,7 @@ describe("429 rate limiting", () => {
       flushInterval: 999_999,
       disablePageLifecycle: true,
       disableAutoAbandon: true,
+      disableTelemetry: true,
     });
 
     client.track({ type: "throttled", session_id: "sess_1" });
@@ -224,6 +227,7 @@ describe("5xx server errors", () => {
       flushInterval: 999_999,
       disablePageLifecycle: true,
       disableAutoAbandon: true,
+      disableTelemetry: true,
     });
 
     client.track({ type: "will_retry", session_id: "sess_1" });

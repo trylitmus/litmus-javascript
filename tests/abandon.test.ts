@@ -46,6 +46,7 @@ function makeClient(overrides?: Partial<LitmusConfig>): LitmusClient {
     apiKey: "ltm_pk_test_abandon",
     flushInterval: 999_999,
     disablePageLifecycle: true,
+    disableTelemetry: true,
     disableAutoAbandon: false,
     abandonThreshold: THRESHOLD,
     abandonCheckInterval: CHECK_INTERVAL,

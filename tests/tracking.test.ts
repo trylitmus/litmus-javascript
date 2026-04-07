@@ -24,7 +24,7 @@ beforeEach(() => {
   server.reset();
 });
 
-/** Create a client pointed at the test server with lifecycle/abandon disabled. */
+/** Create a client pointed at the test server with lifecycle/abandon/startup disabled. */
 function makeClient(overrides?: Partial<LitmusConfig>): LitmusClient {
   return new LitmusClient({
     endpoint: server.endpoint,
@@ -34,6 +34,7 @@ function makeClient(overrides?: Partial<LitmusConfig>): LitmusClient {
     disablePageLifecycle: true,
     disableAutoAbandon: true,
     disableCompression: true,
+    disableTelemetry: true,
     ...overrides,
   });
 }
@@ -460,6 +461,34 @@ describe("opt-out", () => {
 
     expect(server.allEvents).toHaveLength(0);
     expect(client.hasOptedOut()).toBe(true);
+
+    await client.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// $startup event
+// ---------------------------------------------------------------------------
+
+describe("$startup", () => {
+  it("fires on init with environment metadata", async () => {
+    const client = makeClient({ disableTelemetry: false });
+    await client.flush();
+
+    const startup = server.allEvents.find((e) => e.type === "$startup");
+    expect(startup).toBeDefined();
+    expect(startup!.session_id).toBe("");
+    expect(startup!.metadata).toHaveProperty("platform");
+    expect(startup!.metadata?.$lib).toBe("litmus-ts");
+
+    await client.destroy();
+  });
+
+  it("is suppressed by disableTelemetry", async () => {
+    const client = makeClient({ disableTelemetry: true });
+    await client.flush();
+
+    expect(server.allEvents.find((e) => e.type === "$startup")).toBeUndefined();
 
     await client.destroy();
   });

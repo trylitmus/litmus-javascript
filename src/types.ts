@@ -34,7 +34,8 @@ export type SystemEvent =
   | "$return"
   | "$scroll_regression"
   | "$navigate"
-  | "$interrupt";
+  | "$interrupt"
+  | "$startup";
 
 /** What the user passes to `track()`. */
 export interface TrackEvent {
@@ -85,6 +86,10 @@ export interface LitmusConfig {
   debug?: boolean;
   /** Disable queue persistence to sessionStorage. Default: false */
   disableQueuePersistence?: boolean;
+  /** Disable SDK-internal telemetry events ($startup, etc.). Default: false.
+   *  These events help with debugging and environment detection but
+   *  are not required for core functionality. */
+  disableTelemetry?: boolean;
 }
 
 export interface ResolvedConfig {
@@ -101,6 +106,7 @@ export interface ResolvedConfig {
   disableCompression: boolean;
   debug: boolean;
   disableQueuePersistence: boolean;
+  disableTelemetry: boolean;
 }
 
 /** Defaults that a Feature or Generation carries so callers don't repeat themselves. */

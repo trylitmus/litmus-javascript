@@ -36,6 +36,7 @@ import type {
   TrackEvent,
 } from "./types.js";
 import { SDK_NAME, SDK_VERSION } from "./version.js";
+import { collectStartupMetadata } from "./environment.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -97,6 +98,7 @@ export class LitmusClient implements GenerationHost {
       disableCompression: config.disableCompression ?? false,
       debug: config.debug ?? false,
       disableQueuePersistence: config.disableQueuePersistence ?? false,
+      disableTelemetry: config.disableTelemetry ?? false,
       endpoint: config.endpoint ?? "https://ingest.trylitmus.app",
       apiKey: config.apiKey,
     };
@@ -133,6 +135,18 @@ export class LitmusClient implements GenerationHost {
         "tracking is disabled — user opted out or browser Do Not Track is enabled. All events will be" +
           " silently dropped.",
       );
+    }
+
+    // Fire $startup so the ingest server knows the SDK initialized.
+    // This doubles as the fastest possible signal for the setup wizard
+    // (no user interaction required) and carries environment metadata
+    // useful for debugging.
+    if (!this.config.disableTelemetry) {
+      this.track({
+        type: "$startup",
+        session_id: "",
+        metadata: collectStartupMetadata(),
+      });
     }
 
     this.log.debug("initialized", { endpoint: this.config.endpoint, version: SDK_VERSION });
@@ -311,7 +325,7 @@ export class LitmusClient implements GenerationHost {
 
     // Client-side rate limiting. Auto-generated events ($abandon, $pageleave)
     // bypass the limiter since they're SDK-internal, not caller-driven.
-    const isInternal = event.type === "$abandon" || event.type === "$pageleave";
+    const isInternal = event.type === "$abandon" || event.type === "$pageleave" || event.type === "$startup";
     if (!isInternal && this.rateLimiter.isRateLimited()) {
       this.log.debug("event dropped by rate limiter", event.type);
       return;

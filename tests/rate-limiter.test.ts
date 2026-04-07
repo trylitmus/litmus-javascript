@@ -36,6 +36,7 @@ function makeClient(overrides?: Partial<LitmusConfig>): LitmusClient {
     // flush() call at the end of the test bails.
     maxBatchSize: 10_000,
     disablePageLifecycle: true,
+    disableTelemetry: true,
     disableAutoAbandon: true,
     disableCompression: true,
     disableQueuePersistence: true,
