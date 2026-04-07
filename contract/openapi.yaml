@@ -96,7 +96,8 @@ components:
         Known system events: $generation, $regenerate, $copy, $edit, $abandon, $accept,
         $view, $partial_copy, $refine, $followup, $rephrase, $undo, $share, $flag,
         $rate, $escalate, $switch_model, $retry_context, $post_accept_edit,
-        $blur, $return, $scroll_regression, $navigate, $interrupt.
+        $blur, $return, $scroll_regression, $navigate, $interrupt,
+        $startup, $pageleave.
 
     Event:
       type: object
