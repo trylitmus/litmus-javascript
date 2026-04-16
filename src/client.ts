@@ -45,7 +45,7 @@ import { collectStartupMetadata } from "./environment.js";
 const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 30_000;
-const DEFAULT_FLUSH_INTERVAL = 5000;
+const DEFAULT_FLUSH_INTERVAL = 1000;
 const DEFAULT_MAX_BATCH_SIZE = 50;
 const DEFAULT_MAX_QUEUE_SIZE = 10_000;
 
@@ -225,19 +225,24 @@ export class LitmusClient implements GenerationHost {
 
   /**
    * Last-ditch flush during page unload.
-   * Fires $pageleave (explicit session boundary), then $abandon for all
+   * Fires $pageleave (explicit session boundary), then $sessionend for all
    * unresolved generations, then sends everything via sendBeacon.
+   *
+   * NOTE: We intentionally do NOT fire $abandon here. $abandon means the
+   * user explicitly rejected a generation (closed an editor without copying,
+   * clicked "stop", etc.). Tab close is not a quality signal. For session
+   * boundary marking we emit $sessionend on each still-open generation.
    */
   private handleUnload() {
-    // $pageleave is clearer than $abandon with reason "page_unload".
-    // It means "the user left the page" without implying they ignored
-    // the output. An abandon is a judgment, a pageleave is a fact.
+    // $pageleave is a session-level boundary event; $sessionend is the
+    // per-generation flavor. Both are session boundaries, neither is a
+    // quality signal.
     // Only fire if we have a session context (at least one generation was created/attached).
     if (this.lastSessionId) {
       this.track({ type: "$pageleave", session_id: this.lastSessionId });
     }
 
-    // Auto-abandon all unresolved generations.
+    // Emit $sessionend for all unresolved generations (routed via AbandonDetector).
     this.abandonDetector.abandonAll({ reason: "page_unload" });
 
     // Persist whatever's in the buffer (sendBeacon is best-effort, might fail).
@@ -323,22 +328,31 @@ export class LitmusClient implements GenerationHost {
     if (this.destroyed) return;
     if (this.consent.isOptedOut()) return;
 
-    // Client-side rate limiting. Auto-generated events ($abandon, $pageleave)
+    // Client-side rate limiting. Auto-generated events ($sessionend, $pageleave, $startup)
     // bypass the limiter since they're SDK-internal, not caller-driven.
-    const isInternal = event.type === "$abandon" || event.type === "$pageleave" || event.type === "$startup";
+    const isInternal = event.type === "$sessionend" || event.type === "$pageleave" || event.type === "$startup";
     if (!isInternal && this.rateLimiter.isRateLimited()) {
       this.log.debug("event dropped by rate limiter", event.type);
       return;
     }
 
+    // Sanitize numeric fields. NaN/Infinity would cause Postgres NUMERIC
+    // columns to reject the entire batch insert.
+    const sanitized = { ...event };
+    for (const key of ['cost', 'input_tokens', 'output_tokens', 'total_tokens', 'duration_ms', 'ttft_ms'] as const) {
+      if (key in sanitized && typeof sanitized[key] === 'number' && !Number.isFinite(sanitized[key])) {
+        delete sanitized[key];
+      }
+    }
+
     this.buffer.push({
-      ...event,
+      ...sanitized,
       id: crypto.randomUUID(),
       // Timestamp at track time, not flush time. If the user accepts a generation
       // and the flush fires 5s later, we want the accept timestamp, not the flush timestamp.
       timestamp: new Date().toISOString(),
       // SDK identification — so the server knows which SDK version sent this event.
-      metadata: { $lib: SDK_NAME, $lib_version: SDK_VERSION, ...event.metadata },
+      metadata: { $lib: SDK_NAME, $lib_version: SDK_VERSION, ...sanitized.metadata },
     });
 
     this.log.debug("tracked", event.type, event.generation_id ?? "");
@@ -375,6 +389,12 @@ export class LitmusClient implements GenerationHost {
     opts?: FeatureDefaults & {
       prompt_version?: string;
       metadata?: Record<string, unknown>;
+      input_tokens?: number;
+      output_tokens?: number;
+      total_tokens?: number;
+      duration_ms?: number;
+      ttft_ms?: number;
+      cost?: number;
     },
   ): Generation {
     const generationId = crypto.randomUUID();
@@ -394,14 +414,24 @@ export class LitmusClient implements GenerationHost {
       prompt_id: defaults.prompt_id,
       prompt_version: defaults.prompt_version,
       metadata: defaults.metadata,
+      model: opts?.model,
+      provider: opts?.provider,
+      input_tokens: opts?.input_tokens,
+      output_tokens: opts?.output_tokens,
+      total_tokens: opts?.total_tokens,
+      duration_ms: opts?.duration_ms,
+      ttft_ms: opts?.ttft_ms,
+      cost: opts?.cost,
     });
 
     const gen = new Generation(this, sessionId, generationId, defaults);
     this.lastSessionId = sessionId;
 
     if (!this.config.disableAutoAbandon) {
+      // Auto-emitted session boundary, NOT a quality signal.
+      // See abandon.ts header and generation.ts docs on the $abandon vs $sessionend split.
       this.abandonDetector.register(generationId, (metadata) => {
-        gen.event("$abandon", metadata);
+        gen.event("$sessionend", metadata);
       });
     }
 
@@ -419,18 +449,24 @@ export class LitmusClient implements GenerationHost {
     sessionId: string,
     opts?: {
       user_id?: string;
+      prompt_id?: string;
+      prompt_version?: string;
       metadata?: Record<string, unknown>;
     },
   ): Generation {
     const gen = new Generation(this, sessionId, generationId, {
       user_id: opts?.user_id,
+      prompt_id: opts?.prompt_id,
+      prompt_version: opts?.prompt_version,
       metadata: opts?.metadata,
     });
     this.lastSessionId = sessionId;
 
     if (!this.config.disableAutoAbandon) {
+      // Auto-emitted session boundary, NOT a quality signal.
+      // See abandon.ts header and generation.ts docs on the $abandon vs $sessionend split.
       this.abandonDetector.register(generationId, (metadata) => {
-        gen.event("$abandon", metadata);
+        gen.event("$sessionend", metadata);
       });
     }
 
@@ -531,7 +567,7 @@ export class LitmusClient implements GenerationHost {
   }
 
   /**
-   * Shut down the client. Fires $abandon for unresolved generations,
+   * Shut down the client. Fires $sessionend for unresolved generations,
    * persists the queue, and does a final best-effort flush.
    *
    * Returns a Promise so callers can await completion of the final flush.

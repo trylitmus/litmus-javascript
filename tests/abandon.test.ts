@@ -1,5 +1,9 @@
 // ---------------------------------------------------------------------------
-// Integration tests: auto-abandon detection.
+// Integration tests: auto-emitted $sessionend detection.
+//
+// The "abandon detector" internally tracks open generations and fires
+// $sessionend (NOT $abandon) when the user goes idle or the page unloads.
+// $abandon is reserved for user-initiated abandons (explicit gen.event call).
 //
 // Uses jsdom for DOM event dispatching (mousemove, etc.) and REAL timers
 // with short thresholds. No fake timers — they corrupt Node's HTTP stack
@@ -64,58 +68,84 @@ function waitForAbandon(): Promise<void> {
 // Basic abandon detection
 // ---------------------------------------------------------------------------
 
-describe("auto-abandon", () => {
-  it("fires $abandon after idle threshold with no interaction", async () => {
+describe("auto session-end", () => {
+  it("fires $sessionend after idle threshold with no interaction", async () => {
     const client = makeClient();
     const gen = client.generation(crypto.randomUUID());
 
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
-    expect(abandons).toHaveLength(1);
-    expect(abandons[0].generation_id).toBe(gen.id);
-    expect(abandons[0].metadata).toMatchObject({ auto: true });
-    expect(abandons[0].metadata?.idle_ms).toBeGreaterThanOrEqual(THRESHOLD);
-    expect(abandons[0].metadata?.time_to_abandon_ms).toBeDefined();
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend");
+    expect(sessionEnds).toHaveLength(1);
+    expect(sessionEnds[0].generation_id).toBe(gen.id);
+    expect(sessionEnds[0].metadata).toMatchObject({ auto: true, reason: "idle" });
+    expect(sessionEnds[0].metadata?.idle_ms).toBeGreaterThanOrEqual(THRESHOLD);
+    expect(sessionEnds[0].metadata?.open_ms).toBeDefined();
 
-    await client.destroy();
-  });
-
-  it("does NOT fire $abandon if a behavioral signal was tracked", async () => {
-    const client = makeClient();
-    const gen = client.generation(crypto.randomUUID());
-
-    // User accepts — resolves from abandon tracking.
-    gen.event("$accept");
-
-    await waitForAbandon();
-    await client.flush();
-
+    // No $abandon should be emitted automatically — that's user-initiated only.
     const abandons = server.allEvents.filter((e) => e.type === "$abandon");
     expect(abandons).toHaveLength(0);
 
     await client.destroy();
   });
 
-  it("$view does NOT resolve from auto-abandon", async () => {
+  it("does NOT fire $sessionend if a behavioral signal was tracked", async () => {
     const client = makeClient();
     const gen = client.generation(crypto.randomUUID());
 
-    // View is passive — should NOT prevent abandon.
+    // User accepts — resolves from session-end tracking.
+    gen.event("$accept");
+
+    await waitForAbandon();
+    await client.flush();
+
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend");
+    expect(sessionEnds).toHaveLength(0);
+
+    await client.destroy();
+  });
+
+  it("does NOT fire $sessionend if user-initiated $abandon was tracked", async () => {
+    // User explicitly rejects the generation — that's $abandon and also
+    // resolves from the session-end tracker (any signal except $view does).
+    const client = makeClient();
+    const gen = client.generation(crypto.randomUUID());
+
+    gen.event("$abandon", { reason: "rejected" });
+
+    await waitForAbandon();
+    await client.flush();
+
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend");
+    expect(sessionEnds).toHaveLength(0);
+
+    // User-initiated $abandon IS emitted, exactly once, with the caller's metadata.
+    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
+    expect(abandons).toHaveLength(1);
+    expect(abandons[0].metadata).toMatchObject({ reason: "rejected" });
+
+    await client.destroy();
+  });
+
+  it("$view does NOT resolve from auto session-end", async () => {
+    const client = makeClient();
+    const gen = client.generation(crypto.randomUUID());
+
+    // View is passive — should NOT prevent $sessionend.
     gen.event("$view");
 
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
-    expect(abandons).toHaveLength(1);
-    expect(abandons[0].generation_id).toBe(gen.id);
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend");
+    expect(sessionEnds).toHaveLength(1);
+    expect(sessionEnds[0].generation_id).toBe(gen.id);
 
     await client.destroy();
   });
 
-  it("gen.edit() resolves from auto-abandon", async () => {
+  it("gen.edit() resolves from auto session-end", async () => {
     const client = makeClient();
     const gen = client.generation(crypto.randomUUID());
 
@@ -124,8 +154,8 @@ describe("auto-abandon", () => {
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
-    expect(abandons).toHaveLength(0);
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend");
+    expect(sessionEnds).toHaveLength(0);
 
     await client.destroy();
   });
@@ -140,18 +170,18 @@ describe("activity detection", () => {
     const client = makeClient();
     client.generation(crypto.randomUUID());
 
-    // Keep dispatching activity to prevent abandon.
+    // Keep dispatching activity to prevent $sessionend.
     const keepAlive = setInterval(() => {
       window.dispatchEvent(new Event("mousemove"));
     }, THRESHOLD / 3);
 
-    // Wait past the threshold — activity should prevent abandon.
+    // Wait past the threshold — activity should prevent $sessionend.
     await waitForAbandon();
     clearInterval(keepAlive);
     await client.flush();
 
-    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
-    expect(abandons).toHaveLength(0);
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend");
+    expect(sessionEnds).toHaveLength(0);
 
     await client.destroy();
   });
@@ -170,8 +200,8 @@ describe("activity detection", () => {
 
     // Filter by this test's generation to avoid cross-test pollution from
     // fire-and-forget fetches in destroy().
-    const abandons = server.allEvents.filter((e) => e.type === "$abandon" && e.generation_id === gen.id);
-    expect(abandons).toHaveLength(0);
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend" && e.generation_id === gen.id);
+    expect(sessionEnds).toHaveLength(0);
 
     await client.destroy();
   });
@@ -188,13 +218,13 @@ describe("activity detection", () => {
     clearInterval(keepAlive);
     await client.flush();
 
-    const abandons = server.allEvents.filter((e) => e.type === "$abandon" && e.generation_id === gen.id);
-    expect(abandons).toHaveLength(0);
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend" && e.generation_id === gen.id);
+    expect(sessionEnds).toHaveLength(0);
 
     await client.destroy();
   });
 
-  it("activity stops then idle triggers abandon", async () => {
+  it("activity stops then idle triggers $sessionend", async () => {
     const client = makeClient();
     const gen = client.generation(crypto.randomUUID());
 
@@ -206,12 +236,12 @@ describe("activity detection", () => {
     await new Promise((r) => setTimeout(r, THRESHOLD + 50));
     clearInterval(keepAlive);
 
-    // Now go idle — abandon should fire.
+    // Now go idle — $sessionend should fire.
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter((e) => e.type === "$abandon" && e.generation_id === gen.id);
-    expect(abandons).toHaveLength(1);
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend" && e.generation_id === gen.id);
+    expect(sessionEnds).toHaveLength(1);
 
     await client.destroy();
   });
@@ -222,7 +252,7 @@ describe("activity detection", () => {
 // ---------------------------------------------------------------------------
 
 describe("multiple open generations", () => {
-  it("abandons all unresolved generations when user goes idle", async () => {
+  it("emits $sessionend for all unresolved generations when user goes idle", async () => {
     const client = makeClient();
     const gen1 = client.generation(crypto.randomUUID());
     const gen2 = client.generation(crypto.randomUUID());
@@ -234,38 +264,42 @@ describe("multiple open generations", () => {
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
-    expect(abandons).toHaveLength(2);
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend");
+    expect(sessionEnds).toHaveLength(2);
 
-    const abandonedIds = abandons.map((e) => e.generation_id);
-    expect(abandonedIds).toContain(gen1.id);
-    expect(abandonedIds).toContain(gen3.id);
-    expect(abandonedIds).not.toContain(gen2.id);
+    const ids = sessionEnds.map((e) => e.generation_id);
+    expect(ids).toContain(gen1.id);
+    expect(ids).toContain(gen3.id);
+    expect(ids).not.toContain(gen2.id);
 
     await client.destroy();
   });
 });
 
 // ---------------------------------------------------------------------------
-// destroy() fires abandon
+// destroy() fires $sessionend
 // ---------------------------------------------------------------------------
 
 describe("destroy()", () => {
-  it("fires $abandon for all open generations with reason=destroy", async () => {
+  it("fires $sessionend for all open generations with reason=destroy", async () => {
     const client = makeClient();
     const gen = client.generation(crypto.randomUUID());
 
-    // Flush the $generation event, then reset so we only see $abandon.
+    // Flush the $generation event, then reset so we only see $sessionend.
     await client.flush();
     server.reset();
 
     // destroy() is async — await it for proper synchronization.
     await client.destroy();
 
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend");
+    expect(sessionEnds).toHaveLength(1);
+    expect(sessionEnds[0].generation_id).toBe(gen.id);
+    expect(sessionEnds[0].metadata).toMatchObject({ auto: true, reason: "destroy" });
+
+    // destroy() must NEVER fire $abandon — that's user-initiated only.
     const abandons = server.allEvents.filter((e) => e.type === "$abandon");
-    expect(abandons).toHaveLength(1);
-    expect(abandons[0].generation_id).toBe(gen.id);
-    expect(abandons[0].metadata).toMatchObject({ auto: true, reason: "destroy" });
+    expect(abandons).toHaveLength(0);
   });
 });
 
@@ -274,15 +308,15 @@ describe("destroy()", () => {
 // ---------------------------------------------------------------------------
 
 describe("disableAutoAbandon", () => {
-  it("prevents all auto-abandon behavior", async () => {
+  it("prevents all auto-emitted $sessionend behavior", async () => {
     const client = makeClient({ disableAutoAbandon: true });
     const gen = client.generation(crypto.randomUUID());
 
     await waitForAbandon();
     await client.flush();
 
-    const abandons = server.allEvents.filter((e) => e.type === "$abandon" && e.generation_id === gen.id);
-    expect(abandons).toHaveLength(0);
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend" && e.generation_id === gen.id);
+    expect(sessionEnds).toHaveLength(0);
 
     await client.destroy();
   });

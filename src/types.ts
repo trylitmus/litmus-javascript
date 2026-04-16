@@ -30,6 +30,7 @@ export type SystemEvent =
   | "$retry_context"
   | "$post_accept_edit"
   | "$pageleave"
+  | "$sessionend"
   | "$blur"
   | "$return"
   | "$scroll_regression"
@@ -46,6 +47,14 @@ export interface TrackEvent {
   prompt_version?: string;
   generation_id?: string;
   metadata?: Record<string, unknown>;
+  model?: string;
+  provider?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  duration_ms?: number;
+  ttft_ms?: number;
+  cost?: number;
 }
 
 /** Internal representation with a stable ID and timestamp assigned at track() time. */
@@ -68,15 +77,21 @@ export interface LitmusConfig {
   /** Disable page lifecycle hooks (pagehide/visibilitychange). Default: false */
   disablePageLifecycle?: boolean;
   /**
-   * Time in ms of user inactivity before unresolved generations auto-fire $abandon.
+   * Time in ms of user inactivity before unresolved generations auto-fire $sessionend.
    * Default: 300000 (5 minutes).
    * Set to 0 or use disableAutoAbandon to disable.
+   *
+   * Note: the name is historical — this controls $sessionend (session boundary),
+   * not $abandon (user-initiated quality signal). See docs/020-abandon-fix.md.
    */
   abandonThreshold?: number;
-  /** Disable automatic abandon detection entirely. Default: false */
+  /**
+   * Disable automatic $sessionend detection entirely. Default: false.
+   * Note: the name is historical, see abandonThreshold docstring.
+   */
   disableAutoAbandon?: boolean;
   /** How often to check for idle generations (ms). Default: 10000. Lower values
-   *  detect abandonment faster but use more CPU. */
+   *  detect idle faster but use more CPU. */
   abandonCheckInterval?: number;
   /** Start with tracking disabled. Call optIn() to enable. Default: false */
   defaultOptOut?: boolean;
@@ -114,6 +129,7 @@ export interface FeatureDefaults {
   prompt_id?: string;
   prompt_version?: string;
   model?: string;
+  provider?: string;
   user_id?: string;
   metadata?: Record<string, unknown>;
 }

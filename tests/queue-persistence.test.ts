@@ -114,7 +114,7 @@ describe("queue persistence", () => {
     const client2 = makeClient();
     await client2.flush();
 
-    // The "survived" event plus $generation/$abandon from destroy should appear.
+    // The "survived" event plus $generation/$sessionend from destroy should appear.
     const survived = server.allEvents.filter((e) => e.type === "survived");
     expect(survived.length).toBeGreaterThanOrEqual(1);
 

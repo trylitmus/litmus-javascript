@@ -1,5 +1,11 @@
 // ---------------------------------------------------------------------------
-// Abandon detection — automatic $abandon for generations nobody interacted with.
+// Session-end detection — automatic $sessionend for generations nobody
+// interacted with.
+//
+// IMPORTANT: This fires $sessionend, NOT $abandon. $abandon is reserved for
+// explicit user-initiated abandons (e.g. gen.event("$abandon") when the
+// user closes an editor without copying). $sessionend is a session boundary
+// marker: "the tab closed or the user walked away", not a quality signal.
 //
 // Two-layer idle detection approach:
 //
@@ -9,7 +15,7 @@
 //   Layer 2 (granular): Per-generation idle timeout (5 min default).
 //     A generation is "open" from creation until any behavioral signal
 //     resolves it (except $view). When the user goes idle for
-//     abandonThreshold ms, all open generations fire $abandon with
+//     abandonThreshold ms, all open generations fire $sessionend with
 //     { auto: true } metadata.
 //
 // Activity sources (raw DOM events that indicate a human is present):
@@ -49,24 +55,33 @@ const IDLE_CHECK_INTERVAL_MS = 10_000;
 export const DEFAULT_ABANDON_THRESHOLD_MS = 5 * 60 * 1_000;
 
 /**
- * Minimal interface for a generation that can be abandoned.
+ * Minimal interface for a generation that the detector can mark as session-ended.
  * Avoids importing the Generation class (which would create a cycle).
  */
 interface AbandonableGeneration {
   createdAt: number;
-  /** Fire $abandon on this generation. Called by the detector when idle threshold is exceeded. */
-  fireAbandon: (metadata: Record<string, unknown>) => void;
+  /**
+   * Fire $sessionend on this generation. Called by the detector when the
+   * idle threshold is exceeded or when the page is unloading.
+   *
+   * This is NOT $abandon — $abandon is reserved for explicit user action
+   * (e.g. closing an editor without copying). $sessionend means "the tab
+   * closed or the user walked away," which is a session boundary, not a
+   * quality signal.
+   */
+  fireSessionEnd: (metadata: Record<string, unknown>) => void;
 }
 
 /**
- * Tracks open generations and fires $abandon when the user goes idle.
+ * Tracks open generations and fires $sessionend when the user goes idle or
+ * the page unloads.
  *
  * Lifecycle:
  *   1. Client creates AbandonDetector in constructor
  *   2. Client calls start() to register DOM activity listeners
  *   3. Client calls register() when a generation is created
  *   4. Client calls resolve() when a behavioral signal is tracked
- *   5. Detector calls fireAbandon() on open generations after idle threshold
+ *   5. Detector calls fireSessionEnd() on open generations after idle threshold
  *   6. Client calls stop() on destroy/cleanup
  */
 export class AbandonDetector {
@@ -84,7 +99,7 @@ export class AbandonDetector {
     this.checkInterval = checkInterval;
   }
 
-  /** Number of generations currently tracked for potential abandon. */
+  /** Number of generations currently tracked for potential session-end emission. */
   get openCount(): number {
     return this.openGenerations.size;
   }
@@ -133,9 +148,9 @@ export class AbandonDetector {
     }
   }
 
-  /** Track a new generation for potential auto-abandon. */
-  register(id: string, fireAbandon: (metadata: Record<string, unknown>) => void) {
-    this.openGenerations.set(id, { createdAt: Date.now(), fireAbandon });
+  /** Track a new generation for potential auto-emitted $sessionend. */
+  register(id: string, fireSessionEnd: (metadata: Record<string, unknown>) => void) {
+    this.openGenerations.set(id, { createdAt: Date.now(), fireSessionEnd });
   }
 
   /** Remove a generation from tracking (it received a behavioral signal). */
@@ -144,13 +159,13 @@ export class AbandonDetector {
   }
 
   /**
-   * Check if the user has been idle long enough to fire $abandon.
+   * Check if the user has been idle long enough to emit $sessionend.
    * Called periodically by the idle check timer.
    *
    * Includes frozen tab detection: mobile browsers can freeze backgrounded
    * tabs, suspending all JS timers. When the tab unfreezes, setInterval
    * fires immediately with a massive time gap. Without this guard, every
-   * open generation would be falsely abandoned.
+   * open generation would falsely get $sessionend.
    *
    * Some SDKs solve this by re-reading timestamps from persistence (not
    * in-memory state). We take a simpler approach: if the elapsed time
@@ -176,16 +191,16 @@ export class AbandonDetector {
     const idleMs = now - this.lastActivityAt;
     if (idleMs < this.threshold) return;
 
-    // Snapshot entries before iterating — fireAbandon() calls back into resolve()
+    // Snapshot entries before iterating — fireSessionEnd() calls back into resolve()
     // which modifies the map. Iterating a snapshot avoids mutation-during-iteration.
     const entries = [...this.openGenerations.entries()];
-    for (const [, { createdAt, fireAbandon }] of entries) {
-      fireAbandon({ auto: true, idle_ms: idleMs, time_to_abandon_ms: now - createdAt });
+    for (const [, { createdAt, fireSessionEnd }] of entries) {
+      fireSessionEnd({ auto: true, reason: "idle", idle_ms: idleMs, open_ms: now - createdAt });
     }
   }
 
   /**
-   * Fire $abandon for all open generations with a given reason.
+   * Fire $sessionend for all open generations with a given reason.
    * Used during page unload and destroy().
    */
   abandonAll(extraMetadata: Record<string, unknown>) {
@@ -193,8 +208,8 @@ export class AbandonDetector {
 
     const entries = [...this.openGenerations.entries()];
     const now = Date.now();
-    for (const [, { createdAt, fireAbandon }] of entries) {
-      fireAbandon({ auto: true, time_to_abandon_ms: now - createdAt, ...extraMetadata });
+    for (const [, { createdAt, fireSessionEnd }] of entries) {
+      fireSessionEnd({ auto: true, open_ms: now - createdAt, ...extraMetadata });
     }
   }
 }

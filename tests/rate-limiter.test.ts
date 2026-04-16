@@ -113,7 +113,7 @@ describe("client-side rate limiting", () => {
     await client.destroy();
   });
 
-  it("$abandon bypasses rate limiter", async () => {
+  it("$sessionend bypasses internal rate limiter", async () => {
     const client = makeClient();
 
     // Drain the rate limiter
@@ -121,12 +121,12 @@ describe("client-side rate limiting", () => {
       client.track({ type: "spam", session_id: "sess_1" });
     }
 
-    // $abandon should still go through (internal event bypass)
-    client.track({ type: "$abandon", session_id: "sess_1", metadata: { auto: true } });
+    // $sessionend should still go through (internal event bypass)
+    client.track({ type: "$sessionend", session_id: "sess_1", metadata: { auto: true } });
     await client.flush();
 
-    const abandons = server.allEvents.filter((e) => e.type === "$abandon");
-    expect(abandons).toHaveLength(1);
+    const sessionEnds = server.allEvents.filter((e) => e.type === "$sessionend");
+    expect(sessionEnds).toHaveLength(1);
 
     await client.destroy();
   });

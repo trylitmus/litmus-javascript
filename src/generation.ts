@@ -15,8 +15,21 @@
 //   gen.edit({ before: original, after: modified }); // user modified then used
 //   gen.event("$copy");                            // user copied the output
 //   gen.event("$regenerate");                      // user asked for a new one
-//   gen.event("$view");                            // passive view (won't cancel auto-abandon)
+//   gen.event("$abandon", { reason: "rejected" }); // user explicitly gave up
+//   gen.event("$view");                            // passive view (won't cancel auto session-end)
 //
+// $abandon vs $sessionend
+// ------------------------
+// $abandon: user explicitly gave up on this output. Closed an editor without
+//   copying/accepting, clicked "stop", rejected the result. This is a
+//   meaningful negative quality signal — fire it from your UI code.
+//
+// $sessionend: auto-emitted by the SDK when the tab closes or the user idles
+//   out with a generation still open. This is a session boundary, NOT a
+//   quality signal. Do not fire it from your UI code.
+//
+// Before 0.5.0, both paths fired $abandon, which made the signal 100% noise
+// (tab close dominated). See docs/020-abandon-fix.md in the monorepo.
 // ---------------------------------------------------------------------------
 
 import type { FeatureDefaults, GenerationHost, SystemEvent } from "./types.js";

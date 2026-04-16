@@ -82,6 +82,67 @@ describe("generation()", () => {
 
     await client.destroy();
   });
+
+  // Regression guard: in v0.4.0 these kwargs were accepted but silently
+  // dropped before the wire payload was built, so the server stored
+  // everything in metadata and the dedicated model/provider/cost columns
+  // were always NULL. These must ride as top-level fields.
+  it("emits model, provider, tokens, cost as top-level wire fields", async () => {
+    const client = makeClient();
+
+    client.generation("sess_1", {
+      prompt_id: "chat",
+      model: "claude-sonnet-4-20250514",
+      provider: "anthropic",
+      input_tokens: 120,
+      output_tokens: 340,
+      total_tokens: 460,
+      duration_ms: 1850,
+      ttft_ms: 240,
+      cost: 0.0042,
+    });
+
+    await client.flush();
+
+    const event = server.allEvents[0];
+    expect(event.type).toBe("$generation");
+    expect(event.model).toBe("claude-sonnet-4-20250514");
+    expect(event.provider).toBe("anthropic");
+    expect(event.input_tokens).toBe(120);
+    expect(event.output_tokens).toBe(340);
+    expect(event.total_tokens).toBe(460);
+    expect(event.duration_ms).toBe(1850);
+    expect(event.ttft_ms).toBe(240);
+    expect(event.cost).toBe(0.0042);
+
+    // Sanity: metadata still carries $lib/$lib_version but NOT the promoted fields.
+    expect(event.metadata?.model).toBeUndefined();
+    expect(event.metadata?.cost).toBeUndefined();
+
+    await client.destroy();
+  });
+
+  it("omits top-level fields when not provided", async () => {
+    const client = makeClient();
+    client.generation("sess_1", { prompt_id: "chat" });
+    await client.flush();
+
+    const event = server.allEvents[0];
+    for (const key of [
+      "model",
+      "provider",
+      "input_tokens",
+      "output_tokens",
+      "total_tokens",
+      "duration_ms",
+      "ttft_ms",
+      "cost",
+    ] as const) {
+      expect(event[key as keyof typeof event]).toBeUndefined();
+    }
+
+    await client.destroy();
+  });
 });
 
 // ---------------------------------------------------------------------------

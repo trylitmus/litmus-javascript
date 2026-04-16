@@ -228,11 +228,11 @@ test("sendBeacon fires on page navigation", async ({ page }) => {
   expect(beaconEvents[0].type).toBe("$generation");
 });
 
-test("auto-abandon fires in real browser after inactivity", async ({ page }) => {
+test("auto $sessionend fires in real browser after inactivity", async ({ page }) => {
   await page.goto(`http://127.0.0.1:${port}/`);
   await page.waitForFunction(() => (window as unknown as Record<string, unknown>).__ready === true);
 
-  // Create a client with a very short abandon threshold (2 seconds for fast test).
+  // Create a client with a very short threshold (2 seconds for fast test).
   await page.evaluate((endpoint: string) => {
     const Client = (window as unknown as Record<string, unknown>).__LitmusClient as new (
       cfg: Record<string, unknown>,
@@ -240,24 +240,24 @@ test("auto-abandon fires in real browser after inactivity", async ({ page }) => 
 
     const litmus = new Client({
       endpoint,
-      apiKey: "ltm_pk_test_abandon_browser",
+      apiKey: "ltm_pk_test_sessionend_browser",
       flushInterval: 999_999,
       disableAutoAbandon: false,
       abandonThreshold: 2000, // 2 seconds
     });
 
-    (litmus as Record<string, (...args: never[]) => unknown>).generation("abandon_sess_1", {
-      prompt_id: "abandon_test",
+    (litmus as Record<string, (...args: never[]) => unknown>).generation("sessionend_sess_1", {
+      prompt_id: "sessionend_test",
     });
 
     (window as unknown as Record<string, unknown>).__litmus = litmus;
   }, `http://127.0.0.1:${port}`);
 
-  // Wait for the abandon threshold + idle check interval (2s + 10s buffer).
+  // Wait for the threshold + idle check interval (2s + 10s buffer).
   // The idle check runs every 10 seconds, so we need to wait for at least one check.
   await page.waitForTimeout(13_000);
 
-  // Manually flush to send the $abandon event.
+  // Manually flush to send the $sessionend event.
   await page.evaluate(async () => {
     const litmus = (window as unknown as Record<string, unknown>).__litmus as Record<
       string,
@@ -269,7 +269,7 @@ test("auto-abandon fires in real browser after inactivity", async ({ page }) => 
   await page.waitForTimeout(500);
 
   const events = allEvents();
-  const abandons = events.filter((e) => e.type === "$abandon" && e.session_id === "abandon_sess_1");
-  expect(abandons.length).toBeGreaterThanOrEqual(1);
-  expect(abandons[0].metadata).toMatchObject({ auto: true });
+  const sessionEnds = events.filter((e) => e.type === "$sessionend" && e.session_id === "sessionend_sess_1");
+  expect(sessionEnds.length).toBeGreaterThanOrEqual(1);
+  expect(sessionEnds[0].metadata).toMatchObject({ auto: true, reason: "idle" });
 });
