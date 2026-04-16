@@ -81,7 +81,7 @@ export class Generation {
    *   gen.edit({ before: aiOutput, after: whatTheUserActuallyUsed });
    */
   edit(opts: { before: string; after: string; metadata?: Record<string, unknown> }) {
-    this.event("$edit", { ...opts.metadata, before: opts.before, after: opts.after });
+    this.event("$edit", { before: opts.before, after: opts.after, ...opts.metadata });
   }
 
   /** User used the output as-is. */
