@@ -315,10 +315,11 @@ describe("feature()", () => {
     expect(genEvent.prompt_id).toBe("summarizer");
     expect(genEvent.prompt_version).toBe("v3.0");
     expect(genEvent.user_id).toBe("user_99");
-    expect(genEvent.metadata).toMatchObject({
-      feature: "summarizer",
-      model: "gpt-4o",
-    });
+    // model is a wire-level field: top-level on the event, not duplicated
+    // into metadata. Only feature name stays in metadata.
+    expect(genEvent.metadata).toMatchObject({ feature: "summarizer" });
+    expect(genEvent.metadata).not.toHaveProperty("model");
+    expect((genEvent as { model?: string }).model).toBe("gpt-4o");
 
     await client.destroy();
   });
@@ -332,6 +333,111 @@ describe("feature()", () => {
 
     expect(server.allEvents[0].prompt_id).toBe("email_drafter");
 
+    await client.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wire-level fields: every entry point must surface these at the top of the
+// event payload (not inside metadata). The ingest server writes them to
+// typed Postgres columns (events.model, events.cost, ...). This block is
+// the regression guard for the v0.5.0 bug where Feature.generation() and
+// Feature.track() dropped or duplicated them.
+// ---------------------------------------------------------------------------
+
+describe("wire-level fields", () => {
+  const SAMPLE = {
+    model: "gpt-4o",
+    provider: "openai",
+    input_tokens: 120,
+    output_tokens: 340,
+    total_tokens: 460,
+    duration_ms: 1850,
+    ttft_ms: 240,
+    cost: 0.0042,
+  } as const;
+
+  function assertTopLevelNoLeak(event: Record<string, unknown>) {
+    for (const [key, expected] of Object.entries(SAMPLE)) {
+      expect(event[key]).toBe(expected);
+      const meta = (event.metadata ?? {}) as Record<string, unknown>;
+      expect(meta).not.toHaveProperty(key);
+    }
+  }
+
+  it("track() serializes wire fields at top level", async () => {
+    const client = makeClient();
+    client.track({ type: "$generation", session_id: "s1", ...SAMPLE });
+    await client.flush();
+
+    assertTopLevelNoLeak(server.allEvents[0]);
+    await client.destroy();
+  });
+
+  it("generation() serializes wire fields at top level", async () => {
+    const client = makeClient();
+    client.generation("s1", { prompt_id: "chat", ...SAMPLE });
+    await client.flush();
+
+    const gen = server.allEvents.find((e) => e.type === "$generation")!;
+    assertTopLevelNoLeak(gen as unknown as Record<string, unknown>);
+    await client.destroy();
+  });
+
+  it("gen.event() serializes wire fields at top level (e.g. $switch_model)", async () => {
+    const client = makeClient();
+    const gen = client.generation("s1", { prompt_id: "chat" });
+    gen.event("$switch_model", { ...SAMPLE });
+    await client.flush();
+
+    const switchEvent = server.allEvents.find((e) => e.type === "$switch_model")!;
+    assertTopLevelNoLeak(switchEvent as unknown as Record<string, unknown>);
+    await client.destroy();
+  });
+
+  it("feature.generation() forwards per-call wire fields at top level", async () => {
+    const client = makeClient();
+    const feat = client.feature("summarizer");
+    feat.generation("s1", { ...SAMPLE });
+    await client.flush();
+
+    const gen = server.allEvents.find((e) => e.type === "$generation")!;
+    assertTopLevelNoLeak(gen as unknown as Record<string, unknown>);
+    await client.destroy();
+  });
+
+  it("feature.track() serializes wire fields at top level", async () => {
+    const client = makeClient();
+    const feat = client.feature("summarizer");
+    feat.track({ type: "$generation", session_id: "s1", ...SAMPLE });
+    await client.flush();
+
+    assertTopLevelNoLeak(server.allEvents[0] as unknown as Record<string, unknown>);
+    await client.destroy();
+  });
+
+  it("feature default model/provider go top-level, never into metadata", async () => {
+    const client = makeClient();
+    const feat = client.feature("content_gen", { model: "gpt-4o", provider: "openai" });
+    feat.generation("s1");
+    await client.flush();
+
+    const gen = server.allEvents.find((e) => e.type === "$generation")!;
+    expect(gen.model).toBe("gpt-4o");
+    expect(gen.provider).toBe("openai");
+    expect(gen.metadata).not.toHaveProperty("model");
+    expect(gen.metadata).not.toHaveProperty("provider");
+    await client.destroy();
+  });
+
+  it("per-call model overrides feature default", async () => {
+    const client = makeClient();
+    const feat = client.feature("chat", { model: "gpt-4o-mini" });
+    feat.generation("s1", { model: "gpt-4o" });
+    await client.flush();
+
+    const gen = server.allEvents.find((e) => e.type === "$generation")!;
+    expect(gen.model).toBe("gpt-4o");
     await client.destroy();
   });
 });

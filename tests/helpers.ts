@@ -15,7 +15,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
-/** Shape of a single event as it arrives at the server. */
+/** Shape of a single event as it arrives at the server. Mirrors contract/openapi.yaml. */
 export interface CapturedEvent {
   type: string;
   session_id: string;
@@ -26,6 +26,15 @@ export interface CapturedEvent {
   metadata?: Record<string, unknown>;
   id: string;
   timestamp: string;
+  // Wire-level fields that the ingest server writes to typed Postgres columns.
+  model?: string;
+  provider?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  duration_ms?: number;
+  ttft_ms?: number;
+  cost?: number;
 }
 
 /** One POST body received by the server. */
