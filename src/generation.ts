@@ -66,12 +66,31 @@ export class Generation {
    *   gen.event("$rate", { value: 4, scale: "5-star" });
    *   gen.event("$view");  // passive — won't cancel auto-abandon
    */
-  event(type: SystemEvent | (string & {}), metadata?: Record<string, unknown>) {
+  event(
+    type: SystemEvent | (string & {}),
+    metadata?: Record<string, unknown> & {
+      // Wire-level fields are typed so callers get autocomplete. At send time
+      // we split them off into top-level fields on the event payload — they
+      // land in real Postgres columns, not JSONB keys.
+      model?: string;
+      provider?: string;
+      input_tokens?: number;
+      output_tokens?: number;
+      total_tokens?: number;
+      duration_ms?: number;
+      ttft_ms?: number;
+      cost?: number;
+    },
+  ) {
     // $view is passive observation — doesn't resolve auto-abandon.
     // Everything else indicates the user interacted with the output.
     if (type !== "$view") {
       this.host._resolveGeneration(this.id);
     }
+
+    // Split wire-level keys out of metadata so they serialize top-level.
+    const { model, provider, input_tokens, output_tokens, total_tokens, duration_ms, ttft_ms, cost, ...rest } =
+      metadata ?? {};
 
     this.host.track({
       type,
@@ -80,7 +99,15 @@ export class Generation {
       prompt_id: this.defaults.prompt_id,
       prompt_version: this.defaults.prompt_version,
       generation_id: this.id,
-      metadata: { ...this.defaults.metadata, ...metadata },
+      model,
+      provider,
+      input_tokens,
+      output_tokens,
+      total_tokens,
+      duration_ms,
+      ttft_ms,
+      cost,
+      metadata: { ...this.defaults.metadata, ...rest },
     });
   }
 

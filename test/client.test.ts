@@ -3,6 +3,7 @@ import { LitmusClient } from "../src";
 import type { TrackEvent } from "../src";
 
 // Captures request bodies sent to the mock server.
+// Mirrors the wire shape defined in contract/openapi.yaml.
 interface CapturedEvent {
   id: string;
   type: string;
@@ -11,7 +12,16 @@ interface CapturedEvent {
   timestamp: string;
   generation_id?: string;
   prompt_id?: string;
+  prompt_version?: string;
   metadata?: Record<string, unknown>;
+  model?: string;
+  provider?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  duration_ms?: number;
+  ttft_ms?: number;
+  cost?: number;
 }
 
 interface CapturedRequest {
@@ -849,8 +859,12 @@ describe("LitmusClient", () => {
       for (const e of events) {
         expect(e.user_id).toBe("user_99");
       }
-      // model in metadata
-      expect(events[0].metadata).toEqual(expect.objectContaining({ model: "claude-sonnet" }));
+      // model is a wire-level field — goes top-level on the $generation event,
+      // NOT duplicated into metadata. The ingest server writes it to the
+      // events.model column; metadata stays for freeform props only.
+      const genEvent = events.find((e: CapturedEvent) => e.type === "$generation")!;
+      expect(genEvent.model).toBe("claude-sonnet");
+      expect(genEvent.metadata).not.toHaveProperty("model");
 
       client.destroy();
       mock.restore();
@@ -921,6 +935,128 @@ describe("LitmusClient", () => {
       // Different generation IDs
       expect(events[0].generation_id).not.toBe(events[2].generation_id);
 
+      client.destroy();
+      mock.restore();
+    });
+  });
+
+  describe("wire-level fields on every entry point", () => {
+    // Regression guard for the v0.5.0 bug where Feature.generation() and
+    // Feature.track() dropped wire fields or duplicated them into metadata.
+    // Every public entry point must (a) surface wire fields at the top of
+    // the event JSON and (b) NOT leak them into metadata alongside.
+    const SAMPLE = {
+      model: "gpt-4o",
+      provider: "openai",
+      input_tokens: 120,
+      output_tokens: 340,
+      total_tokens: 460,
+      duration_ms: 1850,
+      ttft_ms: 240,
+      cost: 0.0042,
+    } as const;
+
+    function assertTopLevelNoLeak(event: CapturedEvent) {
+      for (const [key, expected] of Object.entries(SAMPLE)) {
+        expect(event[key as keyof CapturedEvent]).toBe(expected);
+        expect(event.metadata).not.toHaveProperty(key);
+      }
+    }
+
+    it("track() serializes wire fields at top level", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      client.track({ type: "$generation", session_id: "s1", ...SAMPLE });
+      await client.flush();
+
+      assertTopLevelNoLeak(mock.requests[0].events[0]);
+      client.destroy();
+      mock.restore();
+    });
+
+    it("generation() serializes wire fields at top level", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      client.generation("s1", { prompt_id: "chat", ...SAMPLE });
+      await client.flush();
+
+      const gen = mock.requests[0].events.find((e) => e.type === "$generation")!;
+      assertTopLevelNoLeak(gen);
+      client.destroy();
+      mock.restore();
+    });
+
+    it("gen.event() serializes wire fields at top level", async () => {
+      // Mid-stream $switch_model needs to carry new model + token deltas.
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const gen = client.generation("s1", { prompt_id: "chat" });
+      gen.event("$switch_model", { ...SAMPLE });
+      await client.flush();
+
+      const switchEvent = mock.requests[0].events.find((e) => e.type === "$switch_model")!;
+      assertTopLevelNoLeak(switchEvent);
+      client.destroy();
+      mock.restore();
+    });
+
+    it("feature.generation() serializes per-call wire fields at top level", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const feat = client.feature("summarizer");
+      feat.generation("s1", { ...SAMPLE });
+      await client.flush();
+
+      const gen = mock.requests[0].events.find((e) => e.type === "$generation")!;
+      assertTopLevelNoLeak(gen);
+      client.destroy();
+      mock.restore();
+    });
+
+    it("feature.track() serializes wire fields at top level", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const feat = client.feature("summarizer");
+      feat.track({ type: "$generation", session_id: "s1", ...SAMPLE });
+      await client.flush();
+
+      assertTopLevelNoLeak(mock.requests[0].events[0]);
+      client.destroy();
+      mock.restore();
+    });
+
+    it("feature defaults for model/provider go top-level, never into metadata", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const feat = client.feature("content_gen", { model: "gpt-4o", provider: "openai" });
+      feat.generation("s1");
+      await client.flush();
+
+      const gen = mock.requests[0].events.find((e) => e.type === "$generation")!;
+      expect(gen.model).toBe("gpt-4o");
+      expect(gen.provider).toBe("openai");
+      expect(gen.metadata).not.toHaveProperty("model");
+      expect(gen.metadata).not.toHaveProperty("provider");
+      client.destroy();
+      mock.restore();
+    });
+
+    it("per-call model overrides feature default", async () => {
+      const mock = createMockServer([]);
+      const client = newClient();
+
+      const feat = client.feature("chat", { model: "gpt-4o-mini" });
+      feat.generation("s1", { model: "gpt-4o" });
+      await client.flush();
+
+      const gen = mock.requests[0].events.find((e) => e.type === "$generation")!;
+      expect(gen.model).toBe("gpt-4o");
       client.destroy();
       mock.restore();
     });

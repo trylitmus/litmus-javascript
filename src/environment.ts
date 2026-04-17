@@ -13,13 +13,15 @@
 declare const Deno: unknown;
 declare const Bun: unknown;
 declare const EdgeRuntime: unknown;
-declare const process: undefined | {
-  versions?: { node?: string };
-  platform?: string;
-  arch?: string;
-  memoryUsage?: () => { rss: number };
-  env?: Record<string, string | undefined>;
-};
+declare const process:
+  | undefined
+  | {
+      versions?: { node?: string };
+      platform?: string;
+      arch?: string;
+      memoryUsage?: () => { rss: number };
+      env?: Record<string, string | undefined>;
+    };
 
 export function detectPlatform(): string {
   if (typeof Deno !== "undefined") return "deno";
@@ -73,9 +75,7 @@ function browserContext(): Record<string, unknown> {
 
     // User preferences
     if (typeof window.matchMedia === "function") {
-      ctx.prefers_color_scheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
+      ctx.prefers_color_scheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
       ctx.prefers_reduced_motion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     }
   }
@@ -103,9 +103,11 @@ function browserContext(): Record<string, unknown> {
 function detectCloud(env: Record<string, string | undefined>): Record<string, unknown> | undefined {
   // Order matters: more specific checks first.
   if (env.VERCEL) return { cloud_provider: "vercel", cloud_region: env.VERCEL_REGION };
-  if (env.AWS_REGION) return { cloud_provider: "aws", cloud_region: env.AWS_REGION, cloud_platform: env.AWS_EXECUTION_ENV };
+  if (env.AWS_REGION)
+    return { cloud_provider: "aws", cloud_region: env.AWS_REGION, cloud_platform: env.AWS_EXECUTION_ENV };
   if (env.FLY_REGION) return { cloud_provider: "fly", cloud_region: env.FLY_REGION };
-  if (env.RAILWAY_ENVIRONMENT_NAME) return { cloud_provider: "railway", cloud_environment: env.RAILWAY_ENVIRONMENT_NAME };
+  if (env.RAILWAY_ENVIRONMENT_NAME)
+    return { cloud_provider: "railway", cloud_environment: env.RAILWAY_ENVIRONMENT_NAME };
   if (env.RENDER) return { cloud_provider: "render", cloud_region: env.RENDER_REGION };
   if (env.GCP_PROJECT || env.GOOGLE_CLOUD_PROJECT) return { cloud_provider: "gcp" };
   if (env.WEBSITE_SITE_NAME && env.REGION_NAME) return { cloud_provider: "azure", cloud_region: env.REGION_NAME };

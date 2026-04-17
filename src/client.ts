@@ -21,6 +21,7 @@
 
 import { AbandonDetector, DEFAULT_ABANDON_THRESHOLD_MS } from "./abandon.js";
 import { ConsentManager } from "./consent.js";
+import { collectStartupMetadata } from "./environment.js";
 import { Feature } from "./feature.js";
 import { Generation } from "./generation.js";
 import { createLogger, type Logger } from "./logger.js";
@@ -36,7 +37,6 @@ import type {
   TrackEvent,
 } from "./types.js";
 import { SDK_NAME, SDK_VERSION } from "./version.js";
-import { collectStartupMetadata } from "./environment.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -339,8 +339,8 @@ export class LitmusClient implements GenerationHost {
     // Sanitize numeric fields. NaN/Infinity would cause Postgres NUMERIC
     // columns to reject the entire batch insert.
     const sanitized = { ...event };
-    for (const key of ['cost', 'input_tokens', 'output_tokens', 'total_tokens', 'duration_ms', 'ttft_ms'] as const) {
-      if (key in sanitized && typeof sanitized[key] === 'number' && !Number.isFinite(sanitized[key])) {
+    for (const key of ["cost", "input_tokens", "output_tokens", "total_tokens", "duration_ms", "ttft_ms"] as const) {
+      if (key in sanitized && typeof sanitized[key] === "number" && !Number.isFinite(sanitized[key])) {
         delete sanitized[key];
       }
     }
