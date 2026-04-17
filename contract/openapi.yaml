@@ -97,7 +97,13 @@ components:
         $view, $partial_copy, $refine, $followup, $rephrase, $undo, $share, $flag,
         $rate, $escalate, $switch_model, $retry_context, $post_accept_edit,
         $blur, $return, $scroll_regression, $navigate, $interrupt,
-        $startup, $pageleave.
+        $startup, $pageleave, $sessionend.
+
+        $abandon vs $sessionend: $abandon is a user-initiated negative quality
+        signal (closed editor without using the output, clicked stop, rejected).
+        $sessionend is auto-emitted by the JS SDK when the tab closes or the
+        user idles out with a generation still open — a session boundary, not
+        a quality signal.
 
     Event:
       type: object
@@ -129,6 +135,31 @@ components:
         user_id:
           type: string
           description: Identifier for the end user. Required for cross-session signals (Tier 4+).
+        model:
+          type: string
+          description: Model identifier (e.g. "claude-sonnet-4-20250514", "gpt-4o"). Typically set on $generation events.
+        provider:
+          type: string
+          description: LLM provider (e.g. "anthropic", "openai", "openrouter").
+        input_tokens:
+          type: integer
+          description: Number of input tokens consumed.
+        output_tokens:
+          type: integer
+          description: Number of output tokens produced.
+        total_tokens:
+          type: integer
+          description: Total tokens (input + output).
+        duration_ms:
+          type: integer
+          description: End-to-end generation latency in milliseconds.
+        ttft_ms:
+          type: integer
+          description: Time to first token in milliseconds.
+        cost:
+          type: number
+          format: double
+          description: Generation cost in USD.
         metadata:
           type: object
           additionalProperties: true
